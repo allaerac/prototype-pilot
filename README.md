@@ -57,6 +57,21 @@ Every event has a random ID per phone (`anon_id`), a name, small `props`, and a 
 | `survey_response` | Day 14 and day 28 check-ins | satisfaction, keep using, would pay, comments |
 | `feedback` | Settings → Send feedback | text |
 | `sharing_off`, `sharing_on`, `reset` | Settings | none |
+| `share_pref` | Settings → What we collect | group, on |
+
+### Students choose what they share
+Settings → **What we collect** (also linked from the consent card in setup) lists six groups. Each has what it covers, why we want it, and its own switch. The wording lives in `TRACKING` in `js/content.js`, so the team can edit it.
+
+| Group | Events |
+|---|---|
+| `setup` Your setup answers | `setup_start`, `setup_step`, `setup_complete`, `setup_redo_start`, `setup_redo_complete` |
+| `purchases` Purchases you log | `log_open`, `tx_add`, `tx_delete` |
+| `weeks` How your weeks go | `week_closed`, `alert_shown` |
+| `stress` Money stress check-ins | `stress_checkin`, plus `baseline_stress` inside `setup_complete` |
+| `usage` When and how you use the app | `app_open`, `screen_view`, `recap_view`, `survey_open`, `install_prompt`, `installed` |
+| `deals` Deals you check out | `deal_open`, `deal_source`, `deals_21_toggle` |
+
+Always sent while sharing is on: `consent_given`, `sharing_on`/`sharing_off`, `share_pref`, `reset`, and the surveys and feedback a student chooses to send. Switching a group off also drops that group's events still waiting on the phone. A student who turns a group off won't show up in the metrics below that use it, so check `share_pref` before reading low numbers as low usage.
 
 ## Reading the results (Supabase SQL Editor)
 ```sql

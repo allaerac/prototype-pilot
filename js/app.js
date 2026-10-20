@@ -1,10 +1,10 @@
 // Prototype pilot app: setup, Home (ring + quick-log), Deals, Recap, sheets and limit alerts.
 // Rendering is plain template strings. State lives in store.js; pilot events go through track.js.
-import * as store from './store.js?v=4';
-import { track, flush, pending } from './track.js?v=4';
-import * as B from './budget.js?v=4';
-import { APP_VERSION } from './config.js?v=4';
-import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, DEALS, TIPS } from './content.js?v=4';
+import * as store from './store.js?v=5';
+import { track, flush, pending, groupOn, dropGroup } from './track.js?v=5';
+import * as B from './budget.js?v=5';
+import { APP_VERSION } from './config.js?v=5';
+import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING, DEALS, TIPS } from './content.js?v=5';
 
 const S = store.get;
 const app = document.getElementById('app');
@@ -249,6 +249,7 @@ function setupBody(name) {
       <div class="card">
         <div class="card-head"><b>${esc(CONSENT.title)}</b><span class="s-mono">4 weeks</span></div>
         <ul class="points">${CONSENT.points.map(p => `<li>${esc(p)}</li>`).join('')}</ul>
+        <button class="link" data-sheet="data" style="margin-top:1em">See exactly what we collect and why &rarr;</button>
       </div>`;
   }
   if (name === 'onhand') {
@@ -798,11 +799,26 @@ function renderSheet() {
           ${s.setup ? `<div class="set-row"><div><span>Category split</span><small>${(s.setup.order || CATEGORIES.map(c => c.id)).map(id => catOf(id).name).join(' › ')}</small></div><button class="chip" data-resplit-open>Change split</button></div>` : ''}
           <div class="set-row"><div><span>Show 21+ deals</span><small>Drink specials at Uptown bars</small></div><button class="switch" role="switch" aria-checked="${s.prefs.show21}" data-toggle21><i aria-hidden="true"></i></button></div>
           <div class="set-row"><div><span>Share usage with the ESP201 team</span><small>Random ID ${esc(s.anonId.slice(0, 8))}${n ? ` · ${n} waiting to send` : ''}</small></div><button class="switch" role="switch" aria-checked="${!!(s.consent && s.sharing)}" data-sharing><i aria-hidden="true"></i></button></div>
+          <div class="set-row"><div><span>What we collect</span><small>${s.consent && s.sharing ? `Sharing ${TRACKING.filter(g => groupOn(s, g.id)).length} of ${TRACKING.length}. See why and turn any of it off` : 'See what it is and why we want it'}</small></div><button class="chip" data-sheet="data">See</button></div>
           <div class="set-row"><div><span>Send feedback</span><small>Anything that's confusing, broken or missing</small></div><button class="chip" data-sheet="feedback">Write</button></div>
           ${!isStandalone() ? `<div class="set-row"><div><span>Add to Home Screen</span><small>Keeps your data safe and opens like an app</small></div>${installPrompt ? '<button class="chip" data-install>Install</button>' : ''}</div>` : ''}
           <div class="set-row"><div><span class="danger">Erase everything on this phone</span><small>Purchases, setup and settings</small></div><button class="chip danger" data-reset>${confirmReset ? 'Tap again' : 'Erase'}</button></div>
         </div>
         <p class="s-mono" style="text-align:center">${esc(APP_NAME)} ${APP_VERSION} &middot; ESP201 pilot</p>
+      </div>`;
+  } else if (sheet === 'data') {
+    // before setup's consent step the student can already pick; after "Use it without sharing" nothing is sent
+    const off = !s.sharing;
+    html = `${sheetHead('What we collect')}
+      <div class="sheet-body">
+        <p class="s-soft">All of it is tied to a random ID, never your name. Turn off anything you don't want to share and the app works exactly the same.</p>
+        ${off ? `<p class="note">Sharing is off, so none of this gets sent right now. You can turn it back on in Settings.</p>` : ''}
+        <div>${TRACKING.map(g => `<div class="track-item">
+          <div class="row"><b>${esc(g.name)}</b><button class="switch" role="switch" aria-label="Share ${esc(g.name.toLowerCase())}" aria-checked="${!off && groupOn(s, g.id)}" data-sharepref="${g.id}" ${off ? 'disabled' : ''}><i aria-hidden="true"></i></button></div>
+          <p class="s-soft">${esc(g.what)}</p>
+          <p class="why"><span class="s-mono">Why we want it</span>${esc(g.why)}</p>
+        </div>`).join('')}</div>
+        <p class="s-soft">A few things always come through while sharing is on: check-in surveys and feedback (only when you hit send), and a heads-up when you change these switches.</p>
       </div>`;
   } else if (sheet === 'survey') {
     const id = surveyDraft.id;
@@ -983,6 +999,14 @@ app.addEventListener('click', e => {
     if (!on) track('sharing_off', {});
     store.update(st => { if (on && !st.consent) st.consent = { at: new Date().toISOString(), version: CONSENT.version }; st.sharing = on; });
     if (on) track('sharing_on', {});
+    renderSheet();
+    return;
+  }
+  if (d.sharepref) {
+    const id = d.sharepref, on = !groupOn(s, id);
+    store.update(st => { st.prefs.share = { ...(st.prefs.share || {}), [id]: on }; });
+    if (!on) dropGroup(id);
+    track('share_pref', { group: id, on });
     renderSheet();
     return;
   }

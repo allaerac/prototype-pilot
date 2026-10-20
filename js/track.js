@@ -1,10 +1,15 @@
 // Pilot usage events. Each one is queued on the phone and sent in batches to the Supabase "events" table.
 // Nothing is queued before the student agrees in setup, or after they stop sharing.
-import { SUPABASE_URL, SUPABASE_ANON_KEY, APP_VERSION } from './config.js?v=4';
-import * as store from './store.js?v=4';
+import { SUPABASE_URL, SUPABASE_ANON_KEY, APP_VERSION } from './config.js?v=5';
+import * as store from './store.js?v=5';
+import { TRACKING } from './content.js?v=5';
 
 const QKEY = 'prototype.queue';
 const MAX_QUEUE = 2000;
+const GROUP = {};
+TRACKING.forEach(g => g.events.forEach(n => { GROUP[n] = g.id; }));
+// Groups the student switched off in Settings → What we collect. A missing entry means on.
+export const groupOn = (s, id) => !(s.prefs && s.prefs.share && s.prefs.share[id] === false);
 let queue = [];
 try { queue = JSON.parse(localStorage.getItem(QKEY)) || []; } catch (e) { queue = []; }
 let sending = false;
@@ -17,6 +22,9 @@ function persist() {
 export function track(name, props = {}) {
   const s = store.get();
   if (!s.consent || !s.sharing) return;
+  if (GROUP[name] && !groupOn(s, GROUP[name])) return;
+  // the setup stress answer belongs to the stress group even though it rides on the setup event
+  if ('baseline_stress' in props && !groupOn(s, 'stress')) { props = { ...props }; delete props.baseline_stress; }
   queue.push({
     id: store.newId(),
     anon_id: s.anonId,
@@ -48,6 +56,13 @@ function post(rows, keepalive) {
 }
 
 export function clear() { queue = []; persist(); }
+
+// When a group is switched off, events from it that are still waiting on the phone are dropped too.
+export function dropGroup(id) {
+  queue = queue.filter(e => GROUP[e.name] !== id);
+  queue.forEach(e => { if (id === 'stress' && e.props && 'baseline_stress' in e.props) delete e.props.baseline_stress; });
+  persist();
+}
 
 export async function flush(keepalive = false) {
   if (sending || !queue.length || !SUPABASE_URL || !SUPABASE_ANON_KEY) return;

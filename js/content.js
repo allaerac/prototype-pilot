@@ -36,14 +36,56 @@ export const BILLS = [
 ];
 
 export const CONSENT = {
-  version: 1,
+  version: 2,
   title: 'Help us test this app',
   points: [
     'We collect how you use the app (screens opened, purchases logged, survey answers), tied to a random ID, not your name.',
     'We never connect to your bank, and nothing you log is shared outside the ESP201 team.',
-    'You can stop sharing any time in Settings, and the app keeps working on your phone.'
+    'You can turn off any part of it, or all of it, in Settings, and the app keeps working on your phone.'
   ]
 };
+
+// What the pilot collects, in groups the student can switch off one by one (Settings → What we collect).
+// `events` are the event names in each group; anything not listed here (consent, sharing on/off, surveys and
+// feedback the student chooses to send) always goes through while sharing is on.
+export const TRACKING = [
+  {
+    id: 'setup', name: 'Your setup answers',
+    what: 'The kinds of income and bills you pick (not how much), your weekly number and how you split it up.',
+    why: 'We want to see if setup actually makes sense and if the number we give you feels right, or if people end up changing it. Helps us make setup quicker and the math better.',
+    events: ['setup_start', 'setup_step', 'setup_complete', 'setup_redo_start', 'setup_redo_complete']
+  },
+  {
+    id: 'purchases', name: 'Purchases you log',
+    what: 'The amount, category and day of each purchase you add or remove. Never where you bought it or what you typed in the note.',
+    why: "This is the big one. It shows us if logging is quick enough that people actually keep doing it, and which categories go over the most so we know what to focus on.",
+    events: ['log_open', 'tx_add', 'tx_delete']
+  },
+  {
+    id: 'weeks', name: 'How your weeks go',
+    what: 'If you stayed under your number each week, and when the 75% and 100% alerts popped up.',
+    why: "The whole point is helping you stay on track week to week, so this is how we tell if the app is actually working or not.",
+    events: ['week_closed', 'alert_shown']
+  },
+  {
+    id: 'stress', name: 'Money stress check-ins',
+    what: 'Your 1–5 answer from setup and from each weekly recap.',
+    why: "We want money to feel less stressful, not more. This lets us see if that's actually happening over the 4 weeks.",
+    events: ['stress_checkin']
+  },
+  {
+    id: 'usage', name: 'When and how you use the app',
+    what: 'When you open it, which tabs you look at, and if you added it to your Home Screen.',
+    why: 'Just so we can see which parts people actually use and which ones nobody looks at, so we know what to keep and what to cut.',
+    events: ['app_open', 'screen_view', 'recap_view', 'survey_open', 'install_prompt', 'installed']
+  },
+  {
+    id: 'deals', name: 'Deals you check out',
+    what: 'Which deals you tap on and if you turn on 21+ deals.',
+    why: "We want to know if the deals are actually worth it to people or just kinda there. If nobody taps them we'll swap in better ones.",
+    events: ['deal_open', 'deal_source', 'deals_21_toggle']
+  }
+];
 
 // days: 0 = Sunday … 6 = Saturday. cat: food | drinks | free | national. age21: hide unless the student opts in.
 export const DEALS = [

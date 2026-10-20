@@ -398,6 +398,14 @@ textarea.field { resize: none; min-height: 5em; font: inherit; }
 .split-status { text-align: center; font-size: .92em; color: var(--amber); margin-bottom: .5em; }
 .split-status.ok { color: var(--mint); }
 .cat.over em { color: var(--amber); }
+.track-item { display: grid; gap: .45em; padding: 1em 0; border-top: 1px solid var(--screen-line); }
+.track-item:first-child { border-top: 0; padding-top: .2em; }
+.track-item .row { justify-content: space-between; gap: 1em; }
+.track-item b { font-weight: 500; }
+.track-item p { font-size: .9em; line-height: 1.45; }
+.track-item .why { padding: .7em .9em; border-radius: .9em; background: var(--frost); }
+.track-item .why .s-mono { display: block; margin-bottom: .3em; color: color-mix(in srgb, var(--violet) 60%, var(--screen-ink)); }
+.switch:disabled { opacity: .4; }
 .breakdown { display: grid; }
 .breakdown .s-mono { margin-bottom: .3em; }
 .breakdown .set-row { padding: .6em 0; font-variant-numeric: tabular-nums; }
