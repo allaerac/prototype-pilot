@@ -17,7 +17,6 @@ export const CATEGORIES = [
 export const SOURCES = [
   { id: 'family', name: 'Family', freq: 'monthly' },
   { id: 'job', name: 'Job', freq: 'biweekly' },
-  { id: 'savings', name: 'Savings', freq: 'once' },
   { id: 'loans', name: 'Loans, aid or refund', freq: 'once' }
 ];
 

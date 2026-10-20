@@ -1,6 +1,6 @@
 // Run with: node app/test/budget.test.mjs
 import assert from 'node:assert/strict';
-import { computeWeekly, weekKey, budgetForWeek, closedWeeks, streak, daysLeftInWeek } from '../js/budget.js';
+import { computeWeekly, weekKey, budgetForWeek, closedWeeks, streak, daysLeftInWeek, suggestSplit, categoryLeft } from '../js/budget.js';
 
 const t = (name, fn) => { fn(); console.log('ok -', name); };
 
@@ -22,6 +22,47 @@ t('recurring + bills', () => {
     bills: [{ type: 'phone', amount: 50 }], semesterEnd: end, cushion: true
   }, mon);
   assert.equal(r.weekly, 325);
+});
+t('money on hand joins the pot, several jobs add up', () => {
+  // $1,600 now + $640 refund = $2,240 → $140/wk with no cushion; two jobs: $100/wk + $200 every 2 weeks = $200/wk → $340
+  const r = computeWeekly({
+    onHand: 1600,
+    sources: [{ type: 'loans', amount: 640, freq: 'once' }, { type: 'job', amount: 100, freq: 'weekly' }, { type: 'job', amount: 200, freq: 'biweekly' }],
+    semesterEnd: end, cushion: false
+  }, mon);
+  assert.equal(r.pot, 2240);
+  assert.equal(r.weekly, 340);
+});
+t('bills have their own frequency', () => {
+  // $1,000/wk coming in − $650/mo rent (150/wk) − $20/wk other → 830
+  const r = computeWeekly({
+    sources: [{ type: 'job', amount: 1000, freq: 'weekly' }],
+    bills: [{ type: 'rent', amount: 650, freq: 'monthly' }, { type: 'other', amount: 20, freq: 'weekly' }],
+    semesterEnd: end
+  }, mon);
+  assert.equal(r.weekly, 830);
+});
+t('suggested split favors the top of the order and adds up', () => {
+  const cats = suggestSplit(['food', 'transport', 'shopping', 'fun'], 55);
+  assert.deepEqual(cats, { food: 22, transport: 14, shopping: 11, fun: 8 });
+});
+t('overspending is covered by the lowest priority first', () => {
+  const split = { weekly: 55, order: ['food', 'transport', 'shopping', 'fun'], cats: { food: 25, transport: 12, shopping: 10, fun: 8 } };
+  const rows = categoryLeft(split, 55, { food: 30, transport: 8 });
+  const by = Object.fromEntries(rows.map(r => [r.id, r]));
+  assert.equal(by.food.over, 5);
+  assert.equal(by.food.left, 0);
+  assert.equal(by.fun.left, 3);            // $8 − $5 to cover Food
+  assert.equal(by.fun.covered, 5);
+  assert.equal(by.shopping.left, 10);
+  assert.equal(by.transport.left, 4);
+  // a bigger overspend empties Fun, then takes from Shopping
+  const big = Object.fromEntries(categoryLeft(split, 55, { food: 40 }).map(r => [r.id, r]));
+  assert.equal(big.fun.left, 0);
+  assert.equal(big.shopping.left, 3);
+  // a prorated week scales every category
+  const short = Object.fromEntries(categoryLeft(split, 27.5, {}).map(r => [r.id, r]));
+  assert.equal(short.food.budget, 12.5);
 });
 t('never negative', () => {
   const r = computeWeekly({ sources: [{ type: 'job', amount: 100, freq: 'monthly' }], bills: [{ type: 'rent', amount: 900 }], semesterEnd: end }, mon);

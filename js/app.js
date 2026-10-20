@@ -1,10 +1,10 @@
 // Prototype pilot app: setup, Home (ring + quick-log), Deals, Recap, sheets and limit alerts.
 // Rendering is plain template strings. State lives in store.js; pilot events go through track.js.
-import * as store from './store.js?v=3';
-import { track, flush, pending } from './track.js?v=3';
-import * as B from './budget.js?v=3';
-import { APP_VERSION } from './config.js?v=3';
-import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, DEALS, TIPS } from './content.js?v=3';
+import * as store from './store.js?v=4';
+import { track, flush, pending } from './track.js?v=4';
+import * as B from './budget.js?v=4';
+import { APP_VERSION } from './config.js?v=4';
+import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, DEALS, TIPS } from './content.js?v=4';
 
 const S = store.get;
 const app = document.getElementById('app');
@@ -153,50 +153,87 @@ function reportWeeks() {
 let draft = null;
 let step = 0;
 let setupStarted = 0;
-const FIRST_STEPS = ['welcome', 'sources', 'amounts', 'bills', 'end', 'stress', 'result', 'ready'];
-const REDO_STEPS = ['sources', 'amounts', 'bills', 'end', 'result'];
+const FIRST_STEPS = ['welcome', 'onhand', 'income', 'bills', 'end', 'stress', 'result', 'split', 'ready'];
+const REDO_STEPS = ['onhand', 'income', 'bills', 'end', 'result', 'split'];
 const steps = () => (draft.redo ? REDO_STEPS : FIRST_STEPS);
+const BILL_FREQS = FREQS.filter(f => f.id !== 'once');
+
+// Incomes and bills are lists of rows, so a student can add two jobs or several bills of one type.
+let rowKey = 0;
+const newRow = (type, amount, freq) => ({ key: String(++rowKey), type, amount, freq });
+const rowsOf = kind => (kind === 'inc' ? draft.incomes : draft.bills);
 
 function newDraft(redo) {
   const prev = S().setup;
   const d = {
     redo,
-    sources: {}, bills: {}, noBills: true,
-    semesterEnd: SEMESTER_END_DEFAULT, stress: null, cushion: true, adjust: 0
+    onHand: '', incomes: [], bills: [],
+    semesterEnd: SEMESTER_END_DEFAULT, stress: null, cushion: true, adjust: 0,
+    // category split: priority order, dollars per category, and the weekly number the split was made for
+    order: CATEGORIES.map(c => c.id), cats: null, splitBase: null, splitEdited: false
   };
-  SOURCES.forEach(src => { d.sources[src.id] = { on: false, amount: '', freq: src.freq }; });
-  BILLS.forEach(b => { d.bills[b.id] = { on: false, amount: '' }; });
   if (prev) {
-    (prev.sources || []).forEach(x => { d.sources[x.type] = { on: true, amount: String(x.amount), freq: x.freq }; });
-    (prev.bills || []).forEach(x => { d.bills[x.type] = { on: true, amount: String(x.amount) }; });
-    d.noBills = !(prev.bills || []).length;
+    // setups saved before "money you have now" existed kept it as a one-time "savings" source
+    let have = Number(prev.onHand) || 0;
+    (prev.sources || []).forEach(x => {
+      if (x.type === 'savings') have += Number(x.amount) || 0;
+      else d.incomes.push(newRow(x.type, String(x.amount), x.freq));
+    });
+    d.onHand = have ? String(have) : '';
+    d.bills = (prev.bills || []).map(x => newRow(x.type, String(x.amount), x.freq || 'monthly'));
     d.semesterEnd = prev.semesterEnd || SEMESTER_END_DEFAULT;
     d.cushion = prev.cushion !== false;
+    if (prev.cats && prev.order) {
+      d.order = prev.order.slice();
+      d.cats = { ...prev.cats };
+      d.splitBase = prev.weekly;
+      d.splitEdited = true;
+    }
   }
   if (B.parseKey(d.semesterEnd) <= B.startOfDay(store.now())) d.semesterEnd = '';
   return d;
 }
 function answers() {
+  const row = x => ({ type: x.type, amount: Number(x.amount) || 0, freq: x.freq });
   return {
-    sources: SOURCES.filter(x => draft.sources[x.id].on).map(x => ({ type: x.id, amount: Number(draft.sources[x.id].amount) || 0, freq: draft.sources[x.id].freq })),
-    bills: draft.noBills ? [] : BILLS.filter(x => draft.bills[x.id].on).map(x => ({ type: x.id, amount: Number(draft.bills[x.id].amount) || 0 })),
+    onHand: Number(draft.onHand) || 0,
+    sources: draft.incomes.map(row),
+    bills: draft.bills.map(row),
     semesterEnd: draft.semesterEnd,
     cushion: draft.cushion
   };
 }
+const chosenWeekly = () => Math.max(0, B.computeWeekly(answers(), store.now()).weekly + draft.adjust);
+// The split always matches the current weekly number: if that number changed, start again from the suggestion.
+function ensureSplit() {
+  const w = chosenWeekly();
+  if (!draft.cats || draft.splitBase !== w) {
+    draft.cats = B.suggestSplit(draft.order, w);
+    draft.splitBase = w;
+    draft.splitEdited = false;
+  }
+}
+const splitLeft = () => draft.splitBase - draft.order.reduce((t, id) => t + (Number(draft.cats[id]) || 0), 0);
+
 function stepValid(name) {
   const pos = v => Number(v) > 0;
-  if (name === 'sources') return SOURCES.some(x => draft.sources[x.id].on);
-  if (name === 'amounts') return SOURCES.filter(x => draft.sources[x.id].on).every(x => pos(draft.sources[x.id].amount));
-  if (name === 'bills') return draft.noBills || (BILLS.some(x => draft.bills[x.id].on) && BILLS.filter(x => draft.bills[x.id].on).every(x => pos(draft.bills[x.id].amount)));
+  if (name === 'split') { ensureSplit(); return splitLeft() === 0; }
+  if (name === 'income') return (draft.incomes.length > 0 || pos(draft.onHand)) && draft.incomes.every(x => pos(x.amount));
+  if (name === 'bills') return draft.bills.every(x => pos(x.amount));
   if (name === 'end') return !!draft.semesterEnd && B.parseKey(draft.semesterEnd) > B.startOfDay(store.now());
   if (name === 'stress') return !!draft.stress;
   return true;
 }
 
-function startSetup(redo) {
+function startSetup(redo, at) {
   draft = newDraft(redo);
-  step = 0;
+  step = at ? Math.max(0, steps().indexOf(at)) : 0;
+  draft.at = at;
+  // "Change split" keeps the weekly number in force now instead of a fresh suggestion
+  if (at === 'split') {
+    const cur = B.weeklyFor(S().budgetHistory || [], B.weekKey(store.now()));
+    draft.adjust = cur - B.computeWeekly(answers(), store.now()).weekly;
+  }
   setupStarted = Date.now();
   mode = 'setup';
   app.dataset.mode = 'setup';
@@ -214,35 +251,51 @@ function setupBody(name) {
         <ul class="points">${CONSENT.points.map(p => `<li>${esc(p)}</li>`).join('')}</ul>
       </div>`;
   }
-  if (name === 'sources') {
+  if (name === 'onhand') {
     return `<span class="s-mono when">About a minute</span>
-      <h3>Where does your spending money come from?</h3>
-      <p class="sub">Pick all that apply.</p>
-      <div class="tiles">${SOURCES.map(x => `<button class="tile${draft.sources[x.id].on ? ' sel' : ''}" data-src="${x.id}" aria-pressed="${draft.sources[x.id].on}"><i></i><b>${esc(x.name)}</b></button>`).join('')}</div>`;
+      <h3>How much do you have right now?</h3>
+      <p class="sub">What's in your account or wallet that you can spend this semester. $0 is fine.</p>
+      <div class="money-row"><div class="row"><label for="onhand">Right now</label>
+        <span class="money-in"><span>$</span><input id="onhand" data-onhand inputmode="decimal" autocomplete="off" placeholder="0" value="${esc(draft.onHand)}"></span></div></div>`;
   }
-  if (name === 'amounts') {
-    const on = SOURCES.filter(x => draft.sources[x.id].on);
-    return `<h3>How much?</h3>
-      <p class="sub">${on.some(x => x.id === 'job') ? 'For a job, use a typical paycheck. Round down if it changes.' : 'Your best guess is fine. You can change it later.'}</p>
-      <div class="money-rows">${on.map(x => {
-        const v = draft.sources[x.id];
-        return `<div class="money-row">
-          <div class="row"><label for="amt-${x.id}">${esc(x.name)}</label>
-            <span class="money-in"><span>$</span><input id="amt-${x.id}" data-amt="${x.id}" inputmode="decimal" autocomplete="off" placeholder="0" value="${esc(v.amount)}"></span></div>
-          <div class="freqs">${FREQS.map(f => `<button class="chip${v.freq === f.id ? ' sel' : ''}" data-freq="${x.id}:${f.id}">${f.name}</button>`).join('')}</div>
-        </div>`;
-      }).join('')}</div>`;
+  if (name === 'income') {
+    const none = !draft.incomes.length;
+    return `<h3>What money is still coming in?</h3>
+      <p class="sub">Add each one: a paycheck, money from family, a refund. For a job, use a typical paycheck.</p>
+      ${moneyRows('inc', draft.incomes, SOURCES, FREQS)}
+      <div class="chips">${SOURCES.map(x => `<button class="chip" data-add="inc:${x.id}">+ ${esc(x.name)}</button>`).join('')}</div>
+      ${none ? `<p class="s-soft">${Number(draft.onHand) > 0 ? 'Nothing else coming in? Just continue.' : 'Add at least one, or go back and enter the money you have now.'}</p>` : ''}`;
   }
   if (name === 'bills') {
-    const on = BILLS.filter(x => draft.bills[x.id].on);
-    return `<h3>Does this money have to pay any bills?</h3>
-      <p class="sub">Only bills you pay yourself, from the money you just entered.</p>
+    return `<h3>Any bills you pay yourself?</h3>
+      <p class="sub">Rent, phone, subscriptions: anything that comes out of your own money on a schedule.</p>
+      ${moneyRows('bill', draft.bills, BILLS, BILL_FREQS)}
       <div class="chips">
-        <button class="chip${draft.noBills ? ' sel' : ''}" data-nobills>No bills</button>
-        ${BILLS.map(x => `<button class="chip${!draft.noBills && draft.bills[x.id].on ? ' sel' : ''}" data-bill="${x.id}">${esc(x.name)}</button>`).join('')}
-      </div>
-      ${!draft.noBills && on.length ? `<div class="money-rows">${on.map(x => `<div class="money-row"><div class="row"><label for="bill-${x.id}">${esc(x.name)}</label>
-        <span class="money-in"><span>$</span><input id="bill-${x.id}" data-billamt="${x.id}" inputmode="decimal" autocomplete="off" placeholder="0" value="${esc(draft.bills[x.id].amount)}"><span>/mo</span></span></div></div>`).join('')}</div>` : ''}`;
+        <button class="chip${draft.bills.length ? '' : ' sel'}" data-nobills>No bills</button>
+        ${BILLS.map(x => `<button class="chip" data-add="bill:${x.id}">+ ${esc(x.name)}</button>`).join('')}
+      </div>`;
+  }
+  if (name === 'split') {
+    ensureSplit();
+    return `<span class="s-mono when">Your ${money(draft.splitBase)} a week</span>
+      <h3>Split it up</h3>
+      <p class="sub">Put what matters most at the top. If you go over in one, the ones at the bottom shrink first.</p>
+      <div class="money-rows">${draft.order.map((id, i) => {
+        const c = catOf(id);
+        return `<div class="money-row">
+          <div class="row"><label for="cat-${id}"><span class="rank">${i + 1}</span>${esc(c.name)}</label>
+            <span class="moves">
+              <button class="x" data-move="${id}:-1" aria-label="Move ${esc(c.name)} up" ${i === 0 ? 'disabled' : ''}>&uarr;</button>
+              <button class="x" data-move="${id}:1" aria-label="Move ${esc(c.name)} down" ${i === draft.order.length - 1 ? 'disabled' : ''}>&darr;</button>
+            </span></div>
+          <div class="row split-amt">
+            <button class="x" data-catadj="${id}:-1" aria-label="$1 less for ${esc(c.name)}">−</button>
+            <span class="money-in"><span>$</span><input id="cat-${id}" data-catamt="${id}" inputmode="numeric" autocomplete="off" placeholder="0" value="${esc(draft.cats[id])}"></span>
+            <button class="x" data-catadj="${id}:1" aria-label="$1 more for ${esc(c.name)}">+</button>
+          </div>
+        </div>`;
+      }).join('')}</div>
+      ${draft.splitEdited ? `<button class="text-btn" data-resplit>Use the suggested split</button>` : ''}`;
   }
   if (name === 'end') {
     return `<h3>When does your semester end?</h3>
@@ -258,20 +311,30 @@ function setupBody(name) {
   if (name === 'result') {
     const r = B.computeWeekly(answers(), now);
     const weekly = Math.max(0, r.weekly + draft.adjust);
-    const parts = [];
-    if (r.pot > 0) parts.push(`${money(r.pot - r.held)} ÷ ${r.weeksLeft.toFixed(1)} weeks`);
-    if (r.weeklyIn > 0) parts.push(`${parts.length ? '+ ' : ''}${money(r.weeklyIn)}/wk coming in`);
-    if (r.weeklyBills > 0) parts.push(`− ${money(r.weeklyBills)}/wk in bills`);
     const daysIn = 7 - ((now.getDay() + 6) % 7);
     const firstWeek = !draft.redo && daysIn < 7 ? Math.round(weekly * daysIn / 7) : null;
+    // the math, one line per piece, so a student can see where the number comes from
+    const lines = [];
+    if (r.onHand > 0) lines.push(['Money you have now', money(r.onHand)]);
+    if (r.oneTime > 0) lines.push(['One-time money coming in', money(r.oneTime)]);
+    if (r.held > 0) lines.push(['Kept aside as a 10% cushion', money(-r.held)]);
+    if (r.pot > 0) lines.push([`Spread over ${r.weeksLeft.toFixed(1)} weeks left`, money(r.potWeekly) + '/wk']);
+    if (r.weeklyIn > 0) lines.push(['Paychecks and other income', '+' + money(r.weeklyIn) + '/wk']);
+    if (r.weeklyBills > 0) lines.push(['Bills', money(-r.weeklyBills) + '/wk']);
+    if (draft.adjust) lines.push(['Your change', (draft.adjust > 0 ? '+' : '') + money(draft.adjust) + '/wk']);
     return `<span class="s-mono when">Your weekly number</span>
       <div class="card result">
         <span class="big">${money(weekly)}</span>
-        <span class="s-soft">a week &middot; ${parts.join(' ')}${r.raw - r.weekly >= 0.5 ? ', rounded down' : ''}</span>
+        <span class="s-soft">to spend each week</span>
         <div class="row" style="margin-top:1em;flex-wrap:wrap;gap:.8em">
           <span class="stepper"><button data-adj="-5" aria-label="Lower by $5">−</button><span>${draft.adjust ? (draft.adjust > 0 ? '+' : '−') + '$' + Math.abs(draft.adjust) : 'Suggested'}</span><button data-adj="5" aria-label="Raise by $5">+</button></span>
           ${r.pot > 0 ? `<button class="switch" role="switch" aria-checked="${draft.cushion}" data-cushion>Keep a 10% cushion <i aria-hidden="true"></i></button>` : ''}
         </div>
+      </div>
+      <div class="breakdown">
+        <span class="s-mono">How we got this</span>
+        ${lines.map(([k, v]) => `<div class="set-row"><span class="s-soft">${esc(k)}</span><b>${v}</b></div>`).join('')}
+        <div class="set-row total"><span>Each week${r.raw - r.weekly >= 0.5 && !draft.adjust ? ' <small>(rounded down to $5)</small>' : ''}</span><b>${money(weekly)}</b></div>
       </div>
       ${r.weekly <= 0 ? `<p class="note">Your bills use up most of what's coming in. Let's double-check the numbers, or set a number with + if you know what works for you.</p>`
         : firstWeek !== null ? `<p class="s-soft">This week is shorter, so it starts at ${money(firstWeek)} for ${SHORT[now.getDay()]}–Sun.</p>` : ''}`;
@@ -293,14 +356,36 @@ function setupBody(name) {
   return '';
 }
 
+// One card per income or bill: amount, how often, and a remove button. A second row of the same type is numbered ("Job 2").
+function moneyRows(kind, rows, types, freqs) {
+  if (!rows.length) return '';
+  const seen = {};
+  return `<div class="money-rows">${rows.map(x => {
+    const n = seen[x.type] = (seen[x.type] || 0) + 1;
+    const name = ((types.find(t => t.id === x.type) || {}).name || 'Other') + (n > 1 ? ' ' + n : '');
+    return `<div class="money-row">
+      <div class="row"><label for="${kind}-${x.key}">${esc(name)}</label>
+        <span class="money-in"><span>$</span><input id="${kind}-${x.key}" data-amt="${kind}:${x.key}" inputmode="decimal" autocomplete="off" placeholder="0" value="${esc(x.amount)}"></span>
+        <button class="x" data-rm="${kind}:${x.key}" aria-label="Remove ${esc(name)}">${xIcon}</button></div>
+      <div class="freqs">${freqs.map(f => `<button class="chip${x.freq === f.id ? ' sel' : ''}" data-freq="${kind}:${x.key}:${f.id}">${f.name}</button>`).join('')}</div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
 function setupFoot(name) {
   if (name === 'welcome') {
     return `<button class="cta" data-agree>Agree and start</button>
       <button class="text-btn" data-noshare>Use it without sharing</button>`;
   }
-  const last = name === 'result' && draft.redo;
-  const label = name === 'result' ? (draft.redo ? 'Save my new number' : 'Use this number') : name === 'ready' ? 'Start my week' : 'Continue';
-  return `<button class="cta" data-next ${stepValid(name) ? '' : 'disabled'}>${label} <span aria-hidden="true">${last ? '' : '&rarr;'}</span></button>`;
+  const last = name === 'split' && draft.redo;
+  const label = name === 'result' ? 'Use this number' : name === 'split' ? (draft.redo ? 'Save my plan' : 'Use this split') : name === 'ready' ? 'Start my week' : 'Continue';
+  let status = '';
+  if (name === 'split') {
+    const left = splitLeft();
+    status = `<p class="split-status${left === 0 ? ' ok' : ''}" aria-live="polite">${left === 0 ? `All ${money(draft.splitBase)} is split up`
+      : left > 0 ? `${money(left)} left to assign` : `${money(-left)} too much: take some off`}</p>`;
+  }
+  return `${status}<button class="cta" data-next ${stepValid(name) ? '' : 'disabled'}>${label} <span aria-hidden="true">${last ? '' : '&rarr;'}</span></button>`;
 }
 
 function renderSetup(animate) {
@@ -310,7 +395,7 @@ function renderSetup(animate) {
   viewsEl.innerHTML = `<section class="view v-setup${animate ? '' : ' on'}" aria-label="Setup">
     <div class="setup-top">
       ${canBack ? `<button class="back" data-back>&larr; Back</button>` : `<span class="brand">${miniRing(16)}${esc(APP_NAME)}</span>`}
-      ${draft.redo && step === 0 ? `<button class="back" data-cancel>Cancel</button>` : `<span class="dots" aria-hidden="true">${list.map((_, i) => `<b class="${i <= step ? 'on' : ''}"></b>`).join('')}</span>`}
+      ${draft.redo && (step === 0 || name === draft.at) ? `<button class="back" data-cancel>Cancel</button>` : `<span class="dots" aria-hidden="true">${list.map((_, i) => `<b class="${i <= step ? 'on' : ''}"></b>`).join('')}</span>`}
     </div>
     <div class="setup-body">${setupBody(name)}</div>
     <div class="setup-foot">${setupFoot(name)}</div>
@@ -327,7 +412,7 @@ function nextStep() {
   const name = list[step];
   if (!stepValid(name)) return;
   track('setup_step', { step: name, redo: !!draft.redo });
-  if (name === 'result') { finishSetup(); if (draft.redo) return; }
+  if (name === 'split') { finishSetup(); if (draft.redo) return; }
   if (name === 'ready') { enterApp('home'); return; }
   step = Math.min(list.length - 1, step + 1);
   renderSetup(true);
@@ -339,9 +424,13 @@ function finishSetup() {
   const r = B.computeWeekly(a, now);
   const weekly = Math.max(0, r.weekly + draft.adjust);
   const wk = B.weekKey(now);
+  const order = draft.order.slice();
+  const cats = Object.fromEntries(order.map(id => [id, Number(draft.cats[id]) || 0]));
   store.update(st => {
     st.setup = {
       ...a,
+      order,
+      cats,
       startDate: st.setup && st.setup.startDate ? st.setup.startDate : B.dateKey(now),
       completedAt: now.toISOString(),
       suggested: r.weekly,
@@ -349,13 +438,18 @@ function finishSetup() {
       baselineStress: draft.redo ? (st.setup && st.setup.baselineStress) : draft.stress
     };
     st.budgetHistory = (st.budgetHistory || []).filter(b => b.from !== wk);
-    st.budgetHistory.push({ from: wk, weekly });
+    st.budgetHistory.push({ from: wk, weekly, order, cats });
     st.budgetHistory.sort((x, y) => (x.from < y.from ? -1 : 1));
   });
   track(draft.redo ? 'setup_redo_complete' : 'setup_complete', {
     sources: a.sources.map(x => x.type),
     freqs: a.sources.map(x => x.freq),
     bills: a.bills.map(x => x.type),
+    bill_freqs: a.bills.map(x => x.freq),
+    has_money_now: a.onHand > 0,
+    cat_order: order,
+    cat_split: cats,
+    cat_split_edited: draft.splitEdited,
     cushion: a.cushion,
     suggested: r.weekly,
     weekly,
@@ -366,7 +460,7 @@ function finishSetup() {
   });
   if (draft.redo) {
     enterApp('home');
-    showToast('New weekly number saved', `${money(weekly)} a week, starting this week.`);
+    showToast('New plan saved', `${money(weekly)} a week, starting this week.`);
   }
 }
 
@@ -394,6 +488,8 @@ function homeHTML() {
   const now = store.now();
   const wk = B.weekKey(now);
   const w = weekStats(wk);
+  const split = B.splitFor(S().budgetHistory || [], wk);
+  const spentBy = Object.fromEntries(CATEGORIES.map((c, i) => [c.id, w.byCat[i]]));
   const daysLeft = B.daysLeftInWeek(now);
   const total = weekDays(wk);
   const elapsed = Math.max(0, total - daysLeft);
@@ -425,11 +521,19 @@ function homeHTML() {
       </div>
       <div class="col">
         <div class="card">
-          <div class="card-head"><b>By category</b><span class="s-mono">of ${money(w.budget)}</span></div>
+          ${split ? `<div class="card-head"><b>By category</b><span class="s-mono">left to spend</span></div>
+          <div class="cats">${B.categoryLeft(split, w.budget, spentBy).map(r => {
+            const c = catOf(r.id);
+            // the ring fills as the category gets used up, including money it gave to cover another one
+            const used = r.budget > 0 ? 1 - r.left / r.budget : (r.spent > 0 ? 1 : 0);
+            const note = r.over >= 0.5 ? `${money(r.over)} over` : r.covered >= 0.5 ? `−${money(r.covered)} to cover` : `of ${money(r.budget)}`;
+            return `<div class="cat${r.over >= 0.5 ? ' over' : ''}"><div class="cat-ring">${catRing('cat-' + c.id, c.color, Math.min(1, used))}<span>${money(r.left)}</span></div><b>${esc(c.name)}</b><em>${note}</em></div>`;
+          }).join('')}</div>`
+          : `<div class="card-head"><b>By category</b><span class="s-mono">of ${money(w.budget)}</span></div>
           <div class="cats">${CATEGORIES.map((c, i) => {
             const pct = w.budget > 0 ? w.byCat[i] / w.budget : 0;
             return `<div class="cat"><div class="cat-ring">${catRing('cat-' + c.id, c.color, Math.min(1, pct))}<span>${Math.round(pct * 100)}%</span></div><b>${esc(c.name)}</b><em>${money(w.byCat[i])}</em></div>`;
-          }).join('')}</div>
+          }).join('')}</div>`}
         </div>
         <div class="card fill">
           <div class="card-head"><b>Logged this week</b><span class="s-mono">${items.length} ${items.length === 1 ? 'purchase' : 'purchases'}</span></div>
@@ -691,6 +795,7 @@ function renderSheet() {
       <div class="sheet-body">
         <div>
           <div class="set-row"><div><span>Weekly number</span><small>${money(B.weeklyFor(s.budgetHistory, wk))} a week until ${s.setup ? MONTHS[B.parseKey(s.setup.semesterEnd).getMonth()] + ' ' + B.parseKey(s.setup.semesterEnd).getDate() : '—'}</small></div><button class="chip" data-redo>Redo setup</button></div>
+          ${s.setup ? `<div class="set-row"><div><span>Category split</span><small>${(s.setup.order || CATEGORIES.map(c => c.id)).map(id => catOf(id).name).join(' › ')}</small></div><button class="chip" data-resplit-open>Change split</button></div>` : ''}
           <div class="set-row"><div><span>Show 21+ deals</span><small>Drink specials at Uptown bars</small></div><button class="switch" role="switch" aria-checked="${s.prefs.show21}" data-toggle21><i aria-hidden="true"></i></button></div>
           <div class="set-row"><div><span>Share usage with the ESP201 team</span><small>Random ID ${esc(s.anonId.slice(0, 8))}${n ? ` · ${n} waiting to send` : ''}</small></div><button class="switch" role="switch" aria-checked="${!!(s.consent && s.sharing)}" data-sharing><i aria-hidden="true"></i></button></div>
           <div class="set-row"><div><span>Send feedback</span><small>Anything that's confusing, broken or missing</small></div><button class="chip" data-sheet="feedback">Write</button></div>
@@ -803,10 +908,30 @@ app.addEventListener('click', e => {
   if ('next' in d) { nextStep(); return; }
   if ('back' in d) { step = Math.max(0, step - 1); renderSetup(true); return; }
   if ('cancel' in d) { enterApp('home'); return; }
-  if (d.src) { const v = draft.sources[d.src]; v.on = !v.on; renderSetup(false); return; }
-  if (d.freq) { const [src, f] = d.freq.split(':'); draft.sources[src].freq = f; renderSetup(false); return; }
-  if ('nobills' in d) { draft.noBills = true; renderSetup(false); return; }
-  if (d.bill) { if (draft.noBills) { draft.noBills = false; BILLS.forEach(b => { draft.bills[b.id].on = false; }); } draft.bills[d.bill].on = !draft.bills[d.bill].on; if (!BILLS.some(b => draft.bills[b.id].on)) draft.noBills = true; renderSetup(false); return; }
+  if (d.add) {
+    const [kind, type] = d.add.split(':');
+    const r = newRow(type, '', kind === 'inc' ? SOURCES.find(x => x.id === type).freq : 'monthly');
+    rowsOf(kind).push(r);
+    renderSetup(false);
+    const input = document.getElementById(kind + '-' + r.key);
+    if (input) input.focus();
+    return;
+  }
+  if (d.rm) { const [kind, key] = d.rm.split(':'); const rows = rowsOf(kind); rows.splice(rows.findIndex(x => x.key === key), 1); renderSetup(false); return; }
+  if (d.freq) { const [kind, key, f] = d.freq.split(':'); rowsOf(kind).find(x => x.key === key).freq = f; renderSetup(false); return; }
+  if ('nobills' in d) { draft.bills = []; renderSetup(false); return; }
+  if (d.move) {
+    const [id, dir] = d.move.split(':');
+    const i = draft.order.indexOf(id), j = i + Number(dir);
+    if (j < 0 || j >= draft.order.length) return;
+    [draft.order[i], draft.order[j]] = [draft.order[j], draft.order[i]];
+    // until the student sets amounts themselves, the suggestion follows the new order
+    if (!draft.splitEdited) draft.cats = B.suggestSplit(draft.order, draft.splitBase);
+    renderSetup(false);
+    return;
+  }
+  if (d.catadj) { const [id, n] = d.catadj.split(':'); draft.cats[id] = Math.max(0, (Number(draft.cats[id]) || 0) + Number(n)); draft.splitEdited = true; renderSetup(false); return; }
+  if ('resplit' in d) { draft.cats = B.suggestSplit(draft.order, draft.splitBase); draft.splitEdited = false; renderSetup(false); return; }
   if (d.sstress) { draft.stress = +d.sstress; renderSetup(false); return; }
   if ('cushion' in d) { draft.cushion = !draft.cushion; renderSetup(false); return; }
   if (d.adj) { draft.adjust += +d.adj; const base = B.computeWeekly(answers(), store.now()).weekly; if (base + draft.adjust < 0) draft.adjust = -base; renderSetup(false); return; }
@@ -852,6 +977,7 @@ app.addEventListener('click', e => {
 
   // settings
   if ('redo' in d) { closeSheet(); startSetup(true); return; }
+  if ('resplitOpen' in d) { closeSheet(); startSetup(true, 'split'); return; }
   if ('sharing' in d) {
     const on = !(s.consent && s.sharing);
     if (!on) track('sharing_off', {});
@@ -895,8 +1021,9 @@ app.addEventListener('input', e => {
   const t = e.target;
   const d = t.dataset;
   const clean = v => v.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1').replace(/^(\d{0,6})\d*/, '$1').replace(/(\.\d{0,2})\d*/, '$1');
-  if (d.amt) { t.value = clean(t.value); draft.sources[d.amt].amount = t.value; refreshSetupFoot(); return; }
-  if (d.billamt) { t.value = clean(t.value); draft.bills[d.billamt].amount = t.value; refreshSetupFoot(); return; }
+  if (d.amt) { t.value = clean(t.value); const [kind, key] = d.amt.split(':'); rowsOf(kind).find(x => x.key === key).amount = t.value; refreshSetupFoot(); return; }
+  if ('onhand' in d) { t.value = clean(t.value); draft.onHand = t.value; refreshSetupFoot(); return; }
+  if (d.catamt) { t.value = t.value.replace(/\D/g, '').slice(0, 5); draft.cats[d.catamt] = Number(t.value) || 0; draft.splitEdited = true; refreshSetupFoot(); return; }
   if ('end' in d) { draft.semesterEnd = t.value; renderSetup(false); return; }
   if ('note' in d) { logDraft.note = t.value; return; }
   if ('svtext' in d) { surveyDraft.text = t.value; return; }

@@ -370,7 +370,7 @@ textarea.field { resize: none; min-height: 5em; font: inherit; }
 .dots { display: flex; gap: .35em; }
 .dots b { width: 1.4em; height: .25em; border-radius: 1em; background: var(--screen-line); transition: background .3s; }
 .dots b.on { background: var(--screen-ink); }
-.setup-body { flex: 1; min-height: 0; width: min(34em, 100%); display: flex; flex-direction: column; justify-content: center; gap: 1.6em; }
+.setup-body { flex: 1; min-height: 0; width: min(34em, 100%); display: flex; flex-direction: column; justify-content: safe center; gap: 1.6em; overflow-y: auto; overscroll-behavior: contain; padding: .2em 0; }
 .setup-body h3 { font-family: var(--display); font-weight: 500; font-size: 3em; line-height: 1.02; letter-spacing: -.035em; text-wrap: balance; }
 .setup-body .sub { color: var(--screen-soft); font-size: 1.05em; margin-top: -.6em; }
 .setup-foot { width: min(34em, 100%); display: grid; gap: .3em; flex: none; }
@@ -389,6 +389,21 @@ textarea.field { resize: none; min-height: 5em; font: inherit; }
 .money-row { display: grid; gap: .55em; padding: 1em 1.1em; border-radius: 1.2em; background: var(--frost); border: 1px solid var(--screen-line); }
 .money-row .row { gap: .8em; }
 .money-row label { flex: 1; font-weight: 500; }
+.money-row .x { margin-right: -.3em; }
+.money-row .x:disabled { opacity: .3; }
+.rank { display: inline-grid; place-items: center; width: 1.6em; height: 1.6em; margin-right: .6em; border-radius: 50%; background: var(--screen-2); font-size: .8em; color: var(--screen-soft); }
+.moves { display: flex; gap: .4em; }
+.split-amt { justify-content: flex-start; }
+.split-amt .x { margin: 0; }
+.split-status { text-align: center; font-size: .92em; color: var(--amber); margin-bottom: .5em; }
+.split-status.ok { color: var(--mint); }
+.cat.over em { color: var(--amber); }
+.breakdown { display: grid; }
+.breakdown .s-mono { margin-bottom: .3em; }
+.breakdown .set-row { padding: .6em 0; font-variant-numeric: tabular-nums; }
+.breakdown .set-row b { font-weight: 500; white-space: nowrap; }
+.breakdown .total { font-weight: 500; border-top-color: var(--screen-soft); }
+.breakdown .total small { font-weight: 400; color: var(--screen-soft); font-size: .82em; }
 .money-in { display: flex; align-items: center; gap: .3em; width: 8.5em; padding: .45em .8em; border-radius: .9em; background: var(--screen-2); border: 1px solid var(--screen-line); }
 .money-in:focus-within { border-color: color-mix(in srgb, var(--violet) 60%, transparent); }
 .money-in input { width: 100%; background: none; border: 0; outline: none; font-size: 1.15em; font-variant-numeric: tabular-nums; text-align: right; }

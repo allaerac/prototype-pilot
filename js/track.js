@@ -1,7 +1,7 @@
 // Pilot usage events. Each one is queued on the phone and sent in batches to the Supabase "events" table.
 // Nothing is queued before the student agrees in setup, or after they stop sharing.
-import { SUPABASE_URL, SUPABASE_ANON_KEY, APP_VERSION } from './config.js?v=3';
-import * as store from './store.js?v=3';
+import { SUPABASE_URL, SUPABASE_ANON_KEY, APP_VERSION } from './config.js?v=4';
+import * as store from './store.js?v=4';
 
 const QKEY = 'prototype.queue';
 const MAX_QUEUE = 2000;

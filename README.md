@@ -45,7 +45,8 @@ Every event has a random ID per phone (`anon_id`), a name, small `props`, and a 
 | Event | When | Props |
 |---|---|---|
 | `consent_given` | Student agrees in setup | version |
-| `setup_start`, `setup_step`, `setup_complete` | Setup | step; sources, bills, cushion, suggested vs final number, seconds taken, baseline stress |
+| `setup_start`, `setup_step`, `setup_complete` | Setup | step (`onhand`, `income`, `bills`, `end`, `stress`, `result`, `split`, `ready`); income types and frequencies (a type can repeat), bill types and frequencies, whether they have money now (true/false, never the amount), category priority order and split, whether they changed the suggested split, cushion, suggested vs final number, seconds taken, baseline stress |
+| `setup_redo_start`, `setup_redo_complete` | Settings → Redo setup or Change split | same as `setup_complete`, without baseline stress |
 | `app_open` | Every open or return to the app | standalone (installed?), days since start |
 | `screen_view` | Tab change | screen |
 | `log_open`, `tx_add`, `tx_delete` | Logging | amount, category, today/yesterday, % of week used |
