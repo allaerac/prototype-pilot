@@ -1,11 +1,11 @@
 // Prototype pilot app: setup, Home (ring + quick-log), Deals, Recap, sheets and limit alerts.
 // Rendering is plain template strings. State lives in store.js; pilot events go through track.js.
-import * as store from './store.js?v=11';
-import { track, flush, pending, groupOn, dropGroup, tagQueue } from './track.js?v=11';
-import * as account from './account.js?v=11';
-import * as B from './budget.js?v=11';
-import { APP_VERSION } from './config.js?v=11';
-import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING, DEALS, TIPS } from './content.js?v=11';
+import * as store from './store.js?v=16';
+import { track, flush, pending, groupOn, dropGroup, tagQueue } from './track.js?v=16';
+import * as account from './account.js?v=16';
+import * as B from './budget.js?v=16';
+import { APP_VERSION } from './config.js?v=16';
+import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING, DEALS, QUOTES } from './content.js?v=16';
 
 const S = store.get;
 const app = document.getElementById('app');
@@ -165,8 +165,8 @@ function reportWeeks() {
 let draft = null;
 let step = 0;
 let setupStarted = 0;
-const FIRST_STEPS = ['welcome', 'username', 'onhand', 'income', 'bills', 'end', 'stress', 'result', 'goal', 'split', 'ready'];
-const REDO_STEPS = ['onhand', 'income', 'bills', 'end', 'result', 'goal', 'split'];
+const FIRST_STEPS = ['welcome', 'username', 'onhand', 'income', 'bills', 'end', 'stress', 'goal', 'result', 'split', 'ready'];
+const REDO_STEPS = ['onhand', 'income', 'bills', 'end', 'goal', 'result', 'split'];
 const GOAL_IDEAS = ['Investing', 'Emergency fund', 'Spring break', 'Concert tickets', 'New laptop'];
 // login: "Already have a username?" from the welcome screen. claim: someone set up before usernames existed.
 const steps = () => (draft.login ? ['welcome', 'login'] : draft.claim ? ['username'] : draft.redo ? REDO_STEPS : FIRST_STEPS);
@@ -224,7 +224,8 @@ function answers() {
     cushion: draft.cushion
   };
 }
-const chosenWeekly = () => Math.max(0, B.computeWeekly(answers(), store.now()).weekly + draft.adjust);
+// Weekly money from setup's answers, before the goal and before any − / + change.
+const grossWeekly = () => B.computeWeekly(answers(), store.now()).weekly;
 
 // The goal as typed, or null when skipped or not filled in yet.
 function draftGoal() {
@@ -242,10 +243,53 @@ function saveWeekly() {
   if (!g) return 0;
   const prev = S().setup && S().setup.goal;
   if (!draft.goalTouched && prev && prev.perWeek != null) return prev.perWeek;
-  return B.goalWeekly(g, chosenWeekly(), store.now());
+  return B.goalWeekly(g, grossWeekly(), store.now());
 }
-// What's left to spend each week after the goal: the number the split and Home use.
-const spendWeekly = () => Math.max(0, chosenWeekly() - saveWeekly());
+// What they spend each week: weekly money minus what goes to the goal. draft.adjust is how far the student moved
+// off our pick on the Conservative ↔ Aggressive slider (positive = save less, spend more). This is the number
+// the split and Home use.
+const spendWeekly = () => Math.max(0, grossWeekly() - saveWeekly() + draft.adjust);
+// What actually lands in the goal each week at the level they picked.
+const actualSave = () => (draftGoal() ? Math.max(0, grossWeekly() - spendWeekly()) : 0);
+// The slider runs from Conservative (half our pick) to Aggressive (1.5× our pick, never more than the weekly
+// money), stretched if needed to include what they already had.
+function paceRange() {
+  const planned = saveWeekly(), gross = grossWeekly(), cur = actualSave();
+  const lo = Math.min(Math.round(planned * 0.5), cur), hi = Math.max(Math.min(Math.round(planned * 1.5), gross), cur);
+  return { lo, mid: planned, hi };
+}
+const paceName = save => { const p = paceRange(); return save === p.mid ? 'middle' : save === p.lo ? 'conservative' : save === p.hi ? 'aggressive' : 'custom'; };
+// Full weeks (fractional) from today to a date, for "by Dec 11" impact numbers.
+const weeksUntil = key => Math.max(0, (B.daysBetween(store.now(), B.parseKey(key)) + 1) / 7);
+const dateText = key => `${MONTHS[B.parseKey(key).getMonth()]} ${B.parseKey(key).getDate()}`;
+
+const daysText = n => (n === 1 ? '1 day' : `${n} days`);
+
+// The level they picked in real terms: when they reach the goal, compared with our pick.
+// "By a date" goals: the day they hit the total. Amount-per-period and percent goals: how many days each
+// chunk takes (a percent goal's chunk is a month's worth at our pick).
+function paceText(rate) {
+  const g = draftGoal(), planned = saveWeekly();
+  if (!g || !planned) return null;
+  if (rate <= 0) return { good: false, text: `Nothing goes to ${g.name} at this level.` };
+  if (g.kind === 'by') {
+    const prev = S().setup && S().setup.goal;
+    const same = prev && JSON.stringify(B.goalFields(prev)) === JSON.stringify(g);
+    const left = Math.max(0, g.target - (same ? B.goalProgress(S(), store.now()).total : 0));
+    const days = Math.ceil(left / rate * 7), pick = Math.ceil(left / planned * 7);
+    const when = dateText(B.dateKey(B.addDays(store.now(), days))), pickWhen = dateText(B.dateKey(B.addDays(store.now(), pick)));
+    if (days === pick) return { good: true, text: `Our pick: at ${money(rate)} a week you'll reach ${money(g.target)} by ${when}.` };
+    return days < pick
+      ? { good: true, text: `At ${money(rate)} a week you'll reach ${money(g.target)} on ${when}, ${daysText(pick - days)} sooner than our pick (${pickWhen}).` }
+      : { good: false, text: `At ${money(rate)} a week you'll reach ${money(g.target)} on ${when}, ${daysText(days - pick)} later than our pick (${pickWhen}).` };
+  }
+  const chunk = g.kind === 'every' ? g.amount : Math.round(planned * 52 / 12);
+  const days = Math.max(1, Math.round(chunk / rate * 7)), pick = Math.max(1, Math.round(chunk / planned * 7));
+  if (days === pick) return { good: true, text: `Our pick: ${money(chunk)} put away every ${daysText(pick)}.` };
+  return days < pick
+    ? { good: true, text: `You'll put away ${money(chunk)} every ${daysText(days)} instead of every ${daysText(pick)}: ${daysText(pick - days)} sooner than our pick.` }
+    : { good: false, text: `You'll put away ${money(chunk)} every ${daysText(days)} instead of every ${daysText(pick)}: ${daysText(days - pick)} slower than our pick.` };
+}
 
 // The split always matches the spending number. If it changed, an edited split is resized ("a bit from
 // each"), an untouched one is suggested again.
@@ -281,7 +325,7 @@ function stepValid(name) {
   if (name === 'username') return !!S().username || (!draft.busy && account.USERNAME_OK.test(draft.username));
   if (name === 'login') return !draft.busy && account.USERNAME_OK.test(draft.username);
   if (name === 'split') { ensureSplit(); return splitLeft() === 0; }
-  if (name === 'goal') return draft.noGoal || (!!draftGoal() && saveWeekly() < chosenWeekly());
+  if (name === 'goal') return draft.noGoal || (!!draftGoal() && saveWeekly() < grossWeekly());
   if (name === 'income') return (draft.incomes.length > 0 || pos(draft.onHand)) && draft.incomes.every(x => pos(x.amount));
   if (name === 'bills') return draft.bills.every(x => pos(x.amount));
   if (name === 'end') return !!draft.semesterEnd && B.parseKey(draft.semesterEnd) > B.startOfDay(store.now());
@@ -296,8 +340,8 @@ function startSetup(redo, at, claim) {
   draft.at = at;
   // "Change split" and "Change goal" keep the weekly money in force now instead of a fresh suggestion
   if (at === 'split' || at === 'goal') {
-    const cur = B.weeklyFor(S().budgetHistory || [], B.weekKey(store.now())) + B.saveForWeek({ ...S(), setup: { ...S().setup, startDate: null } }, B.weekKey(store.now()));
-    draft.adjust = cur - B.computeWeekly(answers(), store.now()).weekly;
+    const cur = B.weeklyFor(S().budgetHistory || [], B.weekKey(store.now()));
+    draft.adjust = cur - (grossWeekly() - saveWeekly());
   }
   setupStarted = Date.now();
   mode = 'setup';
@@ -435,34 +479,26 @@ function setupBody(name) {
   }
   if (name === 'result') {
     const r = B.computeWeekly(answers(), now);
-    const weekly = Math.max(0, r.weekly + draft.adjust);
-    const daysIn = 7 - ((now.getDay() + 6) % 7);
-    const firstWeek = !draft.redo && daysIn < 7 ? Math.round(weekly * daysIn / 7) : null;
-    // the math, one line per piece, so a student can see where the number comes from
-    const lines = [];
-    if (r.onHand > 0) lines.push(['Money you have now', money(r.onHand)]);
-    if (r.oneTime > 0) lines.push(['One-time money coming in', money(r.oneTime)]);
-    if (r.held > 0) lines.push(['Kept aside as a 10% cushion', money(-r.held)]);
-    if (r.pot > 0) lines.push([`Spread over ${r.weeksLeft.toFixed(1)} weeks left`, money(r.potWeekly) + '/wk']);
-    if (r.weeklyIn > 0) lines.push(['Paychecks and other income', '+' + money(r.weeklyIn) + '/wk']);
-    if (r.weeklyBills > 0) lines.push(['Bills', money(-r.weeklyBills) + '/wk']);
-    if (draft.adjust) lines.push(['Your change', (draft.adjust > 0 ? '+' : '') + money(draft.adjust) + '/wk']);
+    const g = draftGoal(), bits = resultBits();
+    const save = actualSave(), p = paceRange();
     return `<span class="s-mono when">Your weekly number</span>
       <div class="card result">
-        <span class="big">${money(weekly)}</span>
-        <span class="s-soft">to spend each week</span>
-        <div class="row" style="margin-top:1em;flex-wrap:wrap;gap:.8em">
-          <span class="stepper"><button data-adj="-5" aria-label="Lower by $5">−</button><span>${draft.adjust ? (draft.adjust > 0 ? '+' : '−') + '$' + Math.abs(draft.adjust) : 'Suggested'}</span><button data-adj="5" aria-label="Raise by $5">+</button></span>
-          ${r.pot > 0 ? `<button class="switch" role="switch" aria-checked="${draft.cushion}" data-cushion>Keep a 10% cushion <i aria-hidden="true"></i></button>` : ''}
-        </div>
+        <span class="big" data-r-big>${money(bits.weekly)}</span>
+        <span class="s-soft" data-r-sub>${bits.sub}</span>
+        ${g && p.hi > p.lo ? `<div class="pace-pick">
+          <span class="s-mono">How hard do you want to go at ${esc(g.name)}?</span>
+          <div class="chips pace-chips">${[['lo', 'Conservative', p.lo, ''], ['mid', 'Middle', p.mid, ' · our pick'], ['hi', 'Aggressive', p.hi, '']].map(([k, label, v, note]) =>
+            `<button class="chip${save === v ? ' sel' : ''}" data-pace="${k}" data-pace-v="${v}"><b>${label}</b><small>${money(v)}/wk${note}</small></button>`).join('')}</div>
+          <input type="range" class="save-range" min="${p.lo}" max="${p.hi}" step="1" value="${save}" data-save aria-label="Dollars a week for ${esc(g.name)}" style="--v:${((save - p.lo) / (p.hi - p.lo) * 100).toFixed(1)}%">
+          <div class="scale-ends"><span>${money(p.lo)}/wk · spend more</span><span>save more · ${money(p.hi)}/wk</span></div>
+        </div>` : ''}
+        ${r.pot > 0 ? `<button class="switch" role="switch" aria-checked="${draft.cushion}" data-cushion style="margin-top:1em">Keep a 10% cushion <i aria-hidden="true"></i></button>` : ''}
+        ${g ? '' : `<button class="text-btn add-goal" data-goto-goal>Saving for something? Add a goal &rarr;</button>`}
       </div>
-      <div class="breakdown">
-        <span class="s-mono">How we got this</span>
-        ${lines.map(([k, v]) => `<div class="set-row"><span class="s-soft">${esc(k)}</span><b>${v}</b></div>`).join('')}
-        <div class="set-row total"><span>Each week${r.raw - r.weekly >= 0.5 && !draft.adjust ? ' <small>(rounded down to $5)</small>' : ''}</span><b>${money(weekly)}</b></div>
-      </div>
-      ${r.weekly <= 0 ? `<p class="note">Your bills use up most of what's coming in. Let's double-check the numbers, or set a number with + if you know what works for you.</p>`
-        : firstWeek !== null ? `<p class="s-soft">This week is shorter, so it starts at ${money(firstWeek)} for ${SHORT[now.getDay()]}–Sun.</p>` : ''}`;
+      <div data-r-impact>${bits.impact}</div>
+      <div class="breakdown" data-r-breakdown>${bits.breakdown}</div>
+      ${r.weekly <= 0 ? `<p class="note">Your bills use up most of what's coming in. Let's double-check the numbers.</p>`
+        : bits.firstWeek !== null ? `<p class="s-soft" data-r-first>This week is shorter, so it starts at ${money(bits.firstWeek)} for ${SHORT[now.getDay()]}–Sun.</p>` : ''}`;
   }
   if (name === 'ready') {
     const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
@@ -486,19 +522,59 @@ function setupBody(name) {
 function goalPreview() {
   const g = draftGoal();
   if (!g) return '';
-  const gross = chosenWeekly(), save = saveWeekly(), spend = gross - save;
+  const save = saveWeekly(), gross = grossWeekly();
+  // before = spending with no goal, after = spending with it (both include any − / + change from earlier)
+  const beforeSpend = Math.max(0, gross + draft.adjust), spend = spendWeekly();
   if (save >= gross) return `<p class="note">That's more than you have each week. Try a smaller amount${g.kind === 'by' ? ' or a later date' : ''}.</p>`;
-  const base = draft.cats && draft.splitBase ? draft.cats : B.suggestSplit(draft.order, gross);
-  const before = B.scaleSplit(draft.order, base, gross), after = B.scaleSplit(draft.order, base, spend);
+  const base = draft.cats && draft.splitBase ? draft.cats : B.suggestSplit(draft.order, beforeSpend);
+  const before = B.scaleSplit(draft.order, base, beforeSpend), after = B.scaleSplit(draft.order, base, spend);
   const name = id => (draft.categories.find(c => c.id === id) || catOf(id)).name;
   const row = (k, a, b) => `<div class="set-row"><span class="s-soft">${esc(k)}</span><b>${money(a)} <span class="arrow">&rarr;</span> ${money(b)}</b></div>`;
   return `<div class="breakdown">
     <span class="s-mono">What it changes, per week</span>
     <div class="set-row total"><span>Set aside for ${esc(g.name)}</span><b>${money(save)}/wk <small>about ${money(save * 52 / 12)}/mo</small></b></div>
-    ${row('Your weekly number', gross, spend)}
+    ${row('Your weekly number', beforeSpend, spend)}
     ${draft.order.map(id => row(name(id), before[id], after[id])).join('')}
   </div>`;
 }
+// The parts of the weekly-number screen that change while they slide: the number, the line under it,
+// the "days sooner / later" note and the math.
+function resultBits() {
+  const now = store.now(), r = B.computeWeekly(answers(), now);
+  const g = draftGoal(), weekly = spendWeekly(), save = actualSave();
+  const lines = [];
+  if (r.onHand > 0) lines.push(['Money you have now', money(r.onHand)]);
+  if (r.oneTime > 0) lines.push(['One-time money coming in', money(r.oneTime)]);
+  if (r.held > 0) lines.push(['Kept aside as a 10% cushion', money(-r.held)]);
+  if (r.pot > 0) lines.push([`Spread over ${r.weeksLeft.toFixed(1)} weeks left`, money(r.potWeekly) + '/wk']);
+  if (r.weeklyIn > 0) lines.push(['Paychecks and other income', '+' + money(r.weeklyIn) + '/wk']);
+  if (r.weeklyBills > 0) lines.push(['Bills', money(-r.weeklyBills) + '/wk']);
+  if (g) lines.push([`Saving for ${g.name}`, money(-save) + '/wk']);
+  const pace = paceText(save);
+  const daysIn = 7 - ((now.getDay() + 6) % 7);
+  return {
+    weekly,
+    sub: `to spend each week${g ? `, after ${money(save)} for ${esc(g.name)}` : ''}`,
+    impact: pace ? `<p class="impact${pace.good ? ' good' : ''}" aria-live="polite">${esc(pace.text)}</p>` : '',
+    breakdown: `<span class="s-mono">How we got this</span>
+      ${lines.map(([k, v]) => `<div class="set-row"><span class="s-soft">${esc(k)}</span><b>${v}</b></div>`).join('')}
+      <div class="set-row total"><span>Each week${r.raw - r.weekly >= 0.5 ? ' <small>(rounded down to $5)</small>' : ''}</span><b>${money(weekly)}</b></div>`,
+    firstWeek: !draft.redo && daysIn < 7 ? Math.round(weekly * daysIn / 7) : null
+  };
+}
+function refreshResult() {
+  const bits = resultBits(), save = actualSave(), p = paceRange();
+  const set = (sel, html) => { const el = viewsEl.querySelector(sel); if (el) el.innerHTML = html; };
+  set('[data-r-big]', money(bits.weekly));
+  set('[data-r-sub]', bits.sub);
+  set('[data-r-impact]', bits.impact);
+  set('[data-r-breakdown]', bits.breakdown);
+  if (bits.firstWeek !== null) set('[data-r-first]', `This week is shorter, so it starts at ${money(bits.firstWeek)} for ${SHORT[store.now().getDay()]}–Sun.`);
+  viewsEl.querySelectorAll('[data-pace]').forEach(b => b.classList.toggle('sel', Number(b.dataset.paceV) === save));
+  const range = viewsEl.querySelector('[data-save]');
+  if (range && p.hi > p.lo) range.style.setProperty('--v', ((save - p.lo) / (p.hi - p.lo) * 100).toFixed(1) + '%');
+}
+
 function refreshGoalPreview() {
   const box = viewsEl.querySelector('[data-goal-preview]');
   if (box) box.innerHTML = goalPreview();
@@ -628,9 +704,10 @@ function finishSetup() {
   const now = store.now();
   const a = answers();
   const r = B.computeWeekly(a, now);
-  const gross = chosenWeekly();           // weekly money before the goal
-  const save = saveWeekly();
-  const weekly = gross - save;            // what they spend: Home's ring and the split
+  const gross = grossWeekly();            // weekly money before the goal and − / +
+  const planned = saveWeekly();           // what the goal asks for each week
+  const weekly = spendWeekly();           // what they spend: Home's ring and the split
+  const save = actualSave();              // what really goes to the goal after − / +
   const wk = B.weekKey(now);
   const order = draft.order.slice();
   const cats = Object.fromEntries(order.map(id => [id, Number(draft.cats[id]) || 0]));
@@ -639,7 +716,7 @@ function finishSetup() {
   const g = draftGoal();
   const prevGoal = S().setup && S().setup.goal;
   const same = g && prevGoal && JSON.stringify({ ...g, since: 0 }) === JSON.stringify({ ...B.goalFields(prevGoal), since: 0 });
-  const goal = g ? { ...g, perWeek: save, since: same ? prevGoal.since : wk } : null;
+  const goal = g ? { ...g, perWeek: planned, since: same ? prevGoal.since : wk } : null;
   store.update(st => {
     st.setup = {
       ...a,
@@ -670,13 +747,15 @@ function finishSetup() {
     cushion: a.cushion,
     suggested: r.weekly,
     weekly,
-    goal: goal ? { name: goal.name, kind: goal.kind, freq: goal.freq, pct: goal.pct, per_week: save } : null,
+    goal: goal ? { name: goal.name, kind: goal.kind, freq: goal.freq, pct: goal.pct, per_week: planned, actual_per_week: save } : null,
     adjusted: draft.adjust !== 0,
+    adjust: draft.adjust,
+    pace: g ? paceName(save) : null,
     weeks_left: Math.round(r.weeksLeft * 10) / 10,
     seconds: Math.round((Date.now() - setupStarted) / 1000),
     baseline_stress: draft.redo ? undefined : draft.stress
   });
-  if (g && !same) track('goal_set', { name: g.name, kind: g.kind, freq: g.freq, pct: g.pct, per_week: save, has_date: !!g.date });
+  if (g && !same) track('goal_set', { name: g.name, kind: g.kind, freq: g.freq, pct: g.pct, per_week: planned, has_date: !!g.date });
   if (!g && prevGoal) track('goal_removed', {});
   if (draft.redo) {
     enterApp('home');
@@ -863,7 +942,7 @@ function dealsHTML() {
   const filtered = all.filter(d => dealFilter === 'all' || d.cat === dealFilter)
     .sort((a, b) => (b.days.includes(today) && b.cat !== 'national') - (a.days.includes(today) && a.cat !== 'national'));
   return `<section class="view" data-view="deals" aria-label="Deals">
-    ${vhead(`${DAYS[today]} &middot; Oxford`, 'Student deals', `<button class="switch" role="switch" aria-checked="${S().prefs.show21}" data-toggle21>21+ deals <i aria-hidden="true"></i></button>`)}
+    ${vhead(`${DAYS[today]} &middot; Oxford`, 'Student deals')}
     <div class="grid2">
       <div class="card feature">
         <div class="card-head"><span class="s-mono live">Today &middot; ${todays.length} ${todays.length === 1 ? 'deal' : 'deals'}</span></div>
@@ -894,6 +973,21 @@ function recapWeek() {
   if (closed.length) return { wk: closed[closed.length - 1].wk, kind: 'closed' };
   return { wk: cur, kind: 'first' };
 }
+// "Your recap is ready": once per week, the first time the app is open after it's ready (Sunday 6 pm, or the
+// next time they open it). Skipped if they're already on Recap; opening Recap counts as seeing it.
+let lastRecap = '';
+function checkRecapReady() {
+  if (mode !== 'app') return;
+  const r = recapWeek();
+  // at 6 pm Sunday the Recap switches to the week that's ending: redraw it if they're looking at it
+  if (lastRecap && lastRecap !== r.wk + r.kind && tab === 'recap' && !sheet) renderApp(false);
+  lastRecap = r.wk + r.kind;
+  if (r.kind === 'first' || (S().recapSeen || {})[r.wk]) return;
+  store.update(st => { st.recapSeen = { ...(st.recapSeen || {}), [r.wk]: true }; });
+  if (tab === 'recap') return;
+  showToast('Your recap is ready', r.kind === 'closing' ? 'See how this week went and close it out.' : 'See how last week went.', 'recap');
+  track('recap_ready_shown', { week: r.wk, kind: r.kind });
+}
 function dueSurvey() {
   const s = S();
   const d = daysSinceStart();
@@ -920,7 +1014,7 @@ function recapHTML() {
   const total = w.spent;
   // the student's categories, plus any removed one that still has spending this week
   const shownCats = [...activeCats(), ...allCats().filter(c => c.off && w.spentBy[c.id] > 0)];
-  const tip = TIPS[Math.abs(Math.floor(B.parseKey(wk) / 6048e5)) % TIPS.length];
+  const quote = QUOTES[Math.abs(Math.floor(B.startOfDay(now) / 864e5)) % QUOTES.length];
   const survey = dueSurvey();
   // the week's daily stress answers, their average, and the change from the week before
   const weekStress = key => {
@@ -941,7 +1035,9 @@ function recapHTML() {
           <div class="check"><span class="s-mono">Spent</span><strong>${money(w.spent)}</strong><span class="s-soft">of ${money(w.budget)}</span></div>
           ${sealed ? [0, 45, 90, 135, 180, 225, 270, 315].map((a, i) => `<span class="spark" style="--a:${a}deg;background:${['#6474FF', '#3BCFBF', '#FF9FBD'][i % 3]}"></span>`).join('') : ''}
         </div>
-        <div><h4>${head}</h4><span class="s-soft">${sub}</span><div class="only-portrait-block" style="margin-top:.6em">${streakPill()}</div></div>
+        <div><h4>${head}</h4><span class="s-soft">${sub}</span>
+          ${kind === 'closing' ? '' : `<span class="recap-next">${kind === 'first' ? "It's ready Sunday at 6 pm, and you'll get a notification in the app when it is." : "Next recap: Sunday at 6 pm. You'll get a notification in the app when it's ready."}</span>`}
+          <div class="only-portrait-block" style="margin-top:.6em">${streakPill()}</div></div>
       </div>
       <div class="stack">
         <div class="card streak-card">
@@ -958,7 +1054,7 @@ function recapHTML() {
           <div class="stress-week">${stress.days.map(d => `<div><i style="--v:${d.v == null ? 0 : d.v}%" class="${d.v == null ? 'none' : ''}"></i><span>${d.label}</span></div>`).join('')}</div>
         </div>
         ${survey ? `<button class="nudge" data-sheet="survey"><span><b>Got 30 seconds?</b><br><span class="s-soft">Tell us how the app is going.</span></span><span aria-hidden="true">&rarr;</span></button>`
-        : `<div class="card tip"><div class="card-head"><b>One tip</b><span class="s-mono">20-second read</span></div><p>${esc(tip)}</p></div>`}
+        : `<div class="card tip"><div class="card-head"><b>Quote of the day</b></div><p>“${esc(quote.text)}”</p><span class="s-soft quote-by">${esc(quote.by)}</span></div>`}
       </div>
     </div>
   </section>`;
@@ -990,7 +1086,11 @@ function go(t, force) {
   tab = t;
   renderApp(true);
   track('screen_view', { screen: t });
-  if (t === 'recap') { const r = recapWeek(); track('recap_view', { week: r.wk, kind: r.kind }); }
+  if (t === 'recap') {
+    const r = recapWeek();
+    track('recap_view', { week: r.wk, kind: r.kind });
+    if (r.kind !== 'first' && !(S().recapSeen || {})[r.wk]) store.update(st => { st.recapSeen = { ...(st.recapSeen || {}), [r.wk]: true }; });
+  }
 }
 
 /* ================= Sheets ================= */
@@ -1193,13 +1293,15 @@ function checkAlerts(before, after) {
 }
 
 let toastTimer = 0;
-function showToast(title, body) {
+// goTo: a tab the notification opens, with a "See it" button.
+function showToast(title, body, goTo) {
   toastEl.innerHTML = `<div class="row between">
       <span class="row"><span class="app-ico">${miniRing(13)}</span><b style="font-size:1em">${esc(APP_NAME)}</b></span>
       <span class="row"><span class="s-soft">now</span><button class="x" data-dismiss aria-label="Close notification">${xIcon}</button></span>
     </div>
     <b>${esc(title)}</b>
-    <p>${esc(body)}</p>`;
+    <p>${esc(body)}</p>
+    ${goTo ? `<button class="link toast-go" data-toast-go="${goTo}">See it &rarr;</button>` : ''}`;
   toastEl.classList.add('on');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toastEl.classList.remove('on'), 9000);
@@ -1213,6 +1315,7 @@ app.addEventListener('click', e => {
   const s = S();
 
   if ('dismiss' in d) { toastEl.classList.remove('on'); return; }
+  if (d.toastGo) { toastEl.classList.remove('on'); closeSheet(); go(d.toastGo); return; }
   if ('close' in d) { closeSheet(); return; }
 
   // setup
@@ -1247,11 +1350,11 @@ app.addEventListener('click', e => {
   if (d.catadj) { const [id, n] = d.catadj.split(':'); draft.cats[id] = Math.max(0, (Number(draft.cats[id]) || 0) + Number(n)); draft.splitEdited = true; renderSetup(false); return; }
   if ('stressEdit' in d) { stressEdit = true; renderApp(false); return; }
   if ('stressSave' in d) { saveStress(); return; }
-  if (d.goalpick) { draft.goal.name = d.goalpick; draft.noGoal = false; draft.goalTouched = true; renderSetup(false); return; }
-  if (d.goalkind) { draft.goal.kind = d.goalkind; draft.noGoal = false; draft.goalTouched = true; renderSetup(false); return; }
-  if (d.goalfreq) { draft.goal.freq = d.goalfreq; draft.goalTouched = true; renderSetup(false); return; }
-  if (d.goalpct) { draft.goal.pct = d.goalpct; draft.goalTouched = true; renderSetup(false); return; }
-  if ('goalSkip' in d) { draft.noGoal = true; nextStep(); return; }
+  if (d.goalpick) { draft.goal.name = d.goalpick; draft.noGoal = false; draft.goalTouched = true; draft.adjust = 0; renderSetup(false); return; }
+  if (d.goalkind) { draft.goal.kind = d.goalkind; draft.noGoal = false; draft.goalTouched = true; draft.adjust = 0; renderSetup(false); return; }
+  if (d.goalfreq) { draft.goal.freq = d.goalfreq; draft.goalTouched = true; draft.adjust = 0; renderSetup(false); return; }
+  if (d.goalpct) { draft.goal.pct = d.goalpct; draft.goalTouched = true; draft.adjust = 0; renderSetup(false); return; }
+  if ('goalSkip' in d) { draft.noGoal = true; draft.adjust = 0; nextStep(); return; }
   if (d.catRm) {
     if (draft.order.length <= 1) return;
     draft.order = draft.order.filter(id => id !== d.catRm);
@@ -1264,7 +1367,8 @@ app.addEventListener('click', e => {
   if ('newcatSave' in d) { addNewCat(); return; }
   if ('resplit' in d) { draft.cats = B.suggestSplit(draft.order, draft.splitBase); draft.splitEdited = false; renderSetup(false); return; }
   if ('cushion' in d) { draft.cushion = !draft.cushion; renderSetup(false); return; }
-  if (d.adj) { draft.adjust += +d.adj; const base = B.computeWeekly(answers(), store.now()).weekly; if (base + draft.adjust < 0) draft.adjust = -base; renderSetup(false); return; }
+  if (d.pace) { draft.adjust = saveWeekly() - Number(d.paceV); renderSetup(false); return; }
+  if ('gotoGoal' in d) { draft.noGoal = false; step = steps().indexOf('goal'); renderSetup(true); return; }
   if ('install' in d) { if (installPrompt) { installPrompt.prompt(); installPrompt.userChoice.then(c => track('install_prompt', { outcome: c.outcome })); installPrompt = null; } if (mode === 'setup') renderSetup(false); else renderSheet(); return; }
 
   // app
@@ -1374,6 +1478,7 @@ app.addEventListener('input', e => {
   const d = t.dataset;
   const clean = v => v.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1').replace(/^(\d{0,6})\d*/, '$1').replace(/(\.\d{0,2})\d*/, '$1');
   if ('newcat' in d) { draft.newCat = t.value; return; }
+  if ('save' in d) { draft.adjust = saveWeekly() - Number(t.value); refreshResult(); return; }
   // stress sliders: the fill and the % follow the thumb; the answer is saved when they let go ('change' below)
   if ('sstress' in d || 'stressday' in d) {
     t.style.setProperty('--v', t.value + '%');
@@ -1389,9 +1494,9 @@ app.addEventListener('input', e => {
     }
     return;
   }
-  if ('goalname' in d) { draft.goal.name = t.value; draft.noGoal = false; draft.goalTouched = true; refreshGoalPreview(); return; }
-  if (d.goalf) { t.value = d.goalf === 'pct' ? t.value.replace(/[^0-9.]/g, '').slice(0, 4) : clean(t.value); draft.goal[d.goalf] = t.value; draft.noGoal = false; draft.goalTouched = true; refreshGoalPreview(); return; }
-  if ('goaldate' in d) { draft.goal.date = t.value; draft.goalTouched = true; renderSetup(false); return; }
+  if ('goalname' in d) { draft.goal.name = t.value; draft.noGoal = false; draft.goalTouched = true; draft.adjust = 0; refreshGoalPreview(); return; }
+  if (d.goalf) { t.value = d.goalf === 'pct' ? t.value.replace(/[^0-9.]/g, '').slice(0, 4) : clean(t.value); draft.goal[d.goalf] = t.value; draft.noGoal = false; draft.goalTouched = true; draft.adjust = 0; refreshGoalPreview(); return; }
+  if ('goaldate' in d) { draft.goal.date = t.value; draft.goalTouched = true; draft.adjust = 0; renderSetup(false); return; }
   if ('username' in d) { t.value = account.cleanUsername(t.value); draft.username = t.value; draft.userMsg = ''; refreshSetupFoot(); return; }
   if (d.amt) { t.value = clean(t.value); const [kind, key] = d.amt.split(':'); rowsOf(kind).find(x => x.key === key).amount = t.value; refreshSetupFoot(); return; }
   if ('onhand' in d) { t.value = clean(t.value); draft.onHand = t.value; refreshSetupFoot(); return; }
@@ -1432,8 +1537,9 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   track('app_open', { standalone: isStandalone(), resumed: true, days_since_start: daysSinceStart() });
   refreshIfNewDay();
+  checkRecapReady();
 });
-setInterval(refreshIfNewDay, 60000);
+setInterval(() => { refreshIfNewDay(); checkRecapReady(); }, 60000);
 addEventListener('resize', () => { if (mode === 'app') fitLists(); });
 
 addEventListener('beforeinstallprompt', e => {
@@ -1453,7 +1559,7 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
   if (s.setup) {
     track('app_open', { standalone: isStandalone(), resumed: false, days_since_start: daysSinceStart() });
     reportWeeks();
-    if (s.username) { enterApp('home'); account.backupSoon(); }
+    if (s.username) { enterApp('home'); account.backupSoon(); setTimeout(checkRecapReady, 900); }
     else startSetup(false, null, true);   // set up before usernames existed: pick one, then straight to Home
   } else {
     startSetup(false);

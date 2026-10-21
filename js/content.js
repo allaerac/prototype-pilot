@@ -77,7 +77,7 @@ export const TRACKING = [
     id: 'usage', name: 'When and how you use the app',
     what: 'When you open it, which tabs you look at, and if you added it to your Home Screen.',
     why: 'Just so we can see which parts people actually use and which ones nobody looks at, so we know what to keep and what to cut.',
-    events: ['app_open', 'screen_view', 'recap_view', 'survey_open', 'install_prompt', 'installed']
+    events: ['app_open', 'screen_view', 'recap_view', 'recap_ready_shown', 'survey_open', 'install_prompt', 'installed']
   },
   {
     id: 'deals', name: 'Deals you check out',
@@ -125,17 +125,18 @@ export const DEALS = [
 ];
 
 // Short, plain-English, never preachy. General education, not personalized financial advice. Team reviews tone.
-export const TIPS = [
-  'Packing lunch twice a week instead of buying it saves about $15. Over a semester, that\'s $240.',
-  'Before buying something over $30, wait a day. If you still want it tomorrow, it\'s probably worth it.',
-  'Check your subscriptions once a month. A forgotten $10 one costs $120 a year.',
-  'Splitting a grocery run with a roommate usually beats two people eating out.',
-  'Your student ID is a discount card. It\'s worth asking "do you have a student price?" anywhere.',
-  'A slow week isn\'t a failure. Next week starts fresh on Monday.',
-  'Logging a purchase right away takes 5 seconds. Remembering it on Sunday takes much longer.',
-  'Keep a little cushion. Surprise costs, like a copay or a ride home, are easier when they\'re planned for.',
-  'If something is $5 a day, it\'s about $35 a week. Daily habits are where weekly money goes.',
-  'Free events count as fun too. Trivia nights and campus events cost nothing.',
-  'Under budget this week? Moving even $5 into savings starts the habit.',
-  'Money stress is common. Talking about it with someone you trust usually makes it smaller.'
+// Recap's "Quote of the day" (stand-ins for real money tips, for now). A different one each day.
+export const QUOTES = [
+  { text: 'Beware of little expenses. A small leak will sink a great ship.', by: 'Benjamin Franklin' },
+  { text: 'It does not matter how slowly you go as long as you do not stop.', by: 'Confucius' },
+  { text: 'Do what you can, with what you have, where you are.', by: 'Theodore Roosevelt' },
+  { text: 'An investment in knowledge pays the best interest.', by: 'Benjamin Franklin' },
+  { text: 'Great things are done by a series of small things brought together.', by: 'Vincent van Gogh' },
+  { text: 'A journey of a thousand miles begins with a single step.', by: 'Lao Tzu' },
+  { text: 'Fall seven times, stand up eight.', by: 'Japanese proverb' },
+  { text: 'Little by little, one travels far.', by: 'Spanish proverb' },
+  { text: 'Act as if what you do makes a difference. It does.', by: 'William James' },
+  { text: 'Well done is better than well said.', by: 'Benjamin Franklin' },
+  { text: 'Believe you can and you\'re halfway there.', by: 'Theodore Roosevelt' },
+  { text: 'The secret of getting ahead is getting started.', by: 'Mark Twain' }
 ];

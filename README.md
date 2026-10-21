@@ -7,7 +7,7 @@ A phone web app (PWA) for the ESP201 student pilot. It's plain HTML, CSS and Jav
 | `index.html`, `styles.css` | The page and the design system (same look as the class demo) |
 | `js/app.js` | Screens: setup, Home, Deals, Recap, sheets, alerts |
 | `js/budget.js` | The weekly-number formula, category split, savings goal, weeks, streaks (tested) |
-| `js/content.js` | **Team-editable:** semester end date, deals, tips, consent wording, what-we-collect reasons |
+| `js/content.js` | **Team-editable:** semester end date, deals, quotes, consent wording, what-we-collect reasons |
 | `js/store.js` | The student's data, saved on their phone |
 | `js/account.js` | Username login (no password) and the backup that brings a student's data back on a new phone |
 | `js/track.js` | Pilot usage events, queued on the phone and sent to Supabase |
@@ -30,7 +30,7 @@ node app/test/budget.test.mjs
 1. **Supabase:** done. `supabase/schema.sql` is applied and the anon key is in `js/config.js`. Delete the test rows before launch (test usernames start with `zz_`).
 2. **Semester end:** confirm Miami's last day of finals and update `SEMESTER_END_DEFAULT` in `js/content.js` (currently Dec 11, 2026).
 3. **Deals:** call or visit each venue in `DEALS` (`js/content.js`), delete anything that's wrong, and fill in `checked` with the date. The research and sources are in `pilot/deals-research.md`.
-4. **Copy review:** the team reads the consent text (`CONSENT`) and tips (`TIPS`) for tone and legal framing. Ask the instructor whether collecting this data needs approval.
+4. **Copy review:** the team reads the consent text (`CONSENT`) and Recap's quotes (`QUOTES`, stand-ins for money tips for now) for tone and legal framing. Ask the instructor whether collecting this data needs approval.
 5. **Phones:** students must **add it to their Home Screen**. On iPhone, Safari can erase a website's saved data after 7 days without a visit, but not an installed app's.
 
 ## Deploy for free (GitHub Pages)
@@ -49,7 +49,7 @@ Every event has a random ID per phone (`anon_id`), the student's `username` once
 | Event | When | Props |
 |---|---|---|
 | `consent_given` | Student agrees in setup | version |
-| `setup_start`, `setup_step`, `setup_complete` | Setup | step (`username`, `onhand`, `income`, `bills`, `end`, `stress`, `result`, `goal`, `split`, `ready`); income types and frequencies (a type can repeat), bill types and frequencies, whether they have money now (true/false, never the amount), category priority order, any categories they added, the split per week, whether they changed the suggested split, savings goal (name, kind, dollars a week), cushion, suggested vs final number, seconds taken, baseline stress (0–100) |
+| `setup_start`, `setup_step`, `setup_complete` | Setup | step (`username`, `onhand`, `income`, `bills`, `end`, `stress`, `result`, `goal`, `split`, `ready`); income types and frequencies (a type can repeat), bill types and frequencies, whether they have money now (true/false, never the amount), category priority order, any categories they added, the split per week, whether they changed the suggested split, savings goal (name, kind, dollars a week at our pick and at the level they chose), `pace` (`conservative`, `middle`, `aggressive` or `custom` from the slider), cushion, suggested vs final number, seconds taken, baseline stress (0–100) |
 | `setup_redo_start`, `setup_redo_complete` | Settings → Redo setup, Change split or Change goal | same as `setup_complete`, without baseline stress |
 | `goal_set`, `goal_removed` | A goal is set or changed, or taken away | name, kind (`every`, `by`, `percent`), freq, pct, per_week |
 | `login` | Logged in with a username on this phone | whether a backup came back |
@@ -57,6 +57,7 @@ Every event has a random ID per phone (`anon_id`), the student's `username` once
 | `stress_daily` | Home's money stress slider, once a day (can be changed) | day, pct (0–100), first_today |
 | `app_open` | Every open or return to the app | standalone (installed?), days since start |
 | `screen_view` | Tab change | screen |
+| `recap_ready_shown` | The in-app "Your recap is ready" banner, once per week (Sunday 6 pm or the next open) | week, kind |
 | `log_open`, `tx_add`, `tx_delete` | Logging | amount, category, today/yesterday, % of week used |
 | `alert_shown` | 75% / 100% alert | threshold |
 | `week_closed` | Once per finished week | budget, spent, under, purchases logged, goal_saved (what landed in the goal) |
