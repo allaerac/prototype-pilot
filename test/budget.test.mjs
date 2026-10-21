@@ -1,6 +1,6 @@
 // Run with: node app/test/budget.test.mjs
 import assert from 'node:assert/strict';
-import { computeWeekly, weekKey, budgetForWeek, closedWeeks, streak, daysLeftInWeek, suggestSplit, categoryLeft, goalWeekly, scaleSplit, goalProgress } from '../js/budget.js';
+import { computeWeekly, weekKey, budgetForWeek, closedWeeks, streak, daysLeftInWeek, suggestSplit, categoryLeft, goalWeekly, scaleSplit, goalProgress, projection, dateKey as B_dateKey } from '../js/budget.js';
 
 const t = (name, fn) => { fn(); console.log('ok -', name); };
 
@@ -98,6 +98,26 @@ t('goal fills on weeks you stay on track, going over eats into it', () => {
   assert.equal(g.pending, 25);
   assert.equal(g.month, 25);                                     // November: Nov 2 week (0) + this week (25)
   assert.equal(g.projected('2026-11-30'), 40 + 25 + 25 * 2);     // Nov 16 and Nov 23 weeks still to come
+});
+t('projection: plan vs pace, and when the money runs out', () => {
+  const state = {
+    setup: { startDate: '2026-10-19', semesterEnd: '2026-12-13' },
+    budgetHistory: [{ from: '2026-10-19', weekly: 100 }],
+    tx: [
+      { amount: 140, at: new Date(2026, 9, 21).toISOString() },   // week of Oct 19: 140 of 100
+      { amount: 120, at: new Date(2026, 9, 28).toISOString() }    // week of Oct 26: 120 of 100
+    ]
+  };
+  const p = projection(state, new Date(2026, 10, 2, 9));          // Mon Nov 2, 6 weeks to Dec 13
+  assert.equal(p.weeks, 6);
+  assert.equal(p.start, 600);
+  assert.equal(p.pace, 130);                                      // (140 + 120) / (100 + 100) × 100
+  assert.equal(p.endLeft, 600 - 130 * 6);
+  assert.equal(B_dateKey(p.runOut), '2026-12-04');                // 600 ÷ 130 = 4.6 weeks → 32 days
+  // nothing finished yet: this week so far, scaled to 7 days
+  const fresh = projection({ setup: { startDate: '2026-11-02', semesterEnd: '2026-12-13' }, budgetHistory: [{ from: '2026-11-02', weekly: 100 }], tx: [{ amount: 30, at: new Date(2026, 10, 3).toISOString() }] }, new Date(2026, 10, 4, 9));
+  assert.equal(fresh.pace, 70);                                   // $30 over 3 days → $70 a week
+  assert.equal(fresh.runOut, null);
 });
 t('never negative', () => {
   const r = computeWeekly({ sources: [{ type: 'job', amount: 100, freq: 'monthly' }], bills: [{ type: 'rent', amount: 900 }], semesterEnd: end }, mon);

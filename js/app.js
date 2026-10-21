@@ -1,11 +1,11 @@
 // Prototype pilot app: setup, Home (ring + quick-log), Deals, Recap, sheets and limit alerts.
 // Rendering is plain template strings. State lives in store.js; pilot events go through track.js.
-import * as store from './store.js?v=16';
-import { track, flush, pending, groupOn, dropGroup, tagQueue } from './track.js?v=16';
-import * as account from './account.js?v=16';
-import * as B from './budget.js?v=16';
-import { APP_VERSION } from './config.js?v=16';
-import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING, DEALS, QUOTES } from './content.js?v=16';
+import * as store from './store.js?v=26';
+import { track, flush, pending, groupOn, dropGroup, tagQueue } from './track.js?v=26';
+import * as account from './account.js?v=26';
+import * as B from './budget.js?v=26';
+import { APP_VERSION } from './config.js?v=26';
+import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING, DEALS, QUOTES } from './content.js?v=26';
 
 const S = store.get;
 const app = document.getElementById('app');
@@ -558,7 +558,7 @@ function resultBits() {
     impact: pace ? `<p class="impact${pace.good ? ' good' : ''}" aria-live="polite">${esc(pace.text)}</p>` : '',
     breakdown: `<span class="s-mono">How we got this</span>
       ${lines.map(([k, v]) => `<div class="set-row"><span class="s-soft">${esc(k)}</span><b>${v}</b></div>`).join('')}
-      <div class="set-row total"><span>Each week${r.raw - r.weekly >= 0.5 ? ' <small>(rounded down to $5)</small>' : ''}</span><b>${money(weekly)}</b></div>`,
+      <div class="set-row total"><span>Each week${!g && !draft.adjust && r.raw - r.weekly >= 0.5 ? ' <small>(rounded down to $5)</small>' : ''}</span><b>${money(weekly)}</b></div>`,
     firstWeek: !draft.redo && daysIn < 7 ? Math.round(weekly * daysIn / 7) : null
   };
 }
@@ -770,9 +770,11 @@ function vhead(eyebrow, title, right) {
       <span class="mark" aria-hidden="true">${miniRing(16)}</span>
       <div><span class="s-mono when">${eyebrow}</span><h3>${title}</h3></div>
     </div>
-    <div class="vhead-r">${right || ''}</div>
+    <div class="vhead-r">${right || ''}<button class="icon-btn" data-sheet="settings" aria-label="Settings">${gearIcon}</button></div>
   </div>`;
 }
+// The line at the bottom of every tab: where to send feedback or look for answers.
+const feedbackNote = () => `<button class="view-note" data-sheet="settings">Questions or ideas? <b>Settings</b> → <b>Send feedback</b></button>`;
 function streakLabel() {
   const n = B.streak(S(), store.now());
   const closed = B.closedWeeks(S(), store.now()).length;
@@ -804,7 +806,7 @@ function homeHTML() {
   const items = w.items.slice().sort((a, b) => (a.at < b.at ? 1 : -1));
   const rows = items.map(txRow).join('');
   return `<section class="view" data-view="home" aria-label="Home">
-    ${vhead(`<span class="only-portrait">${streakLabel().short} &middot; </span>${weekRange(wk)}`, greeting(now), `<button class="icon-btn" data-sheet="settings" aria-label="Settings">${gearIcon}</button>`)}
+    ${vhead(`<span class="only-portrait">${streakLabel().short} &middot; </span>${weekRange(wk)}`, greeting(now))}
     <div class="grid2">
       <div class="card hero">
         <div class="hero-top">${streakPill()}</div>
@@ -823,7 +825,7 @@ function homeHTML() {
         ${goalCardHTML()}
         <div class="card">
           ${split ? `<div class="card-head"><b>By category</b><span class="s-mono">left to spend</span></div>
-          <div class="cats" style="--n:${catCols(split.order.length)}">${B.categoryLeft(split, w.budget, spentBy).map(r => {
+          <div class="cats" style="${catCols(split.order.length)}">${B.categoryLeft(split, w.budget, spentBy).map(r => {
             const c = catOf(r.id);
             // the ring fills as the category gets used up, including money it gave to cover another one
             const used = r.budget > 0 ? 1 - r.left / r.budget : (r.spent > 0 ? 1 : 0);
@@ -831,7 +833,7 @@ function homeHTML() {
             return `<div class="cat${r.over >= 0.5 ? ' over' : ''}"><div class="cat-ring">${catRing('cat-' + c.id, c.color, Math.min(1, used))}<span>${money(r.left)}</span></div><b>${esc(c.name)}</b><em>${note}</em></div>`;
           }).join('')}</div>`
           : `<div class="card-head"><b>By category</b><span class="s-mono">of ${money(w.budget)}</span></div>
-          <div class="cats" style="--n:${catCols(activeCats().length)}">${activeCats().map(c => {
+          <div class="cats" style="${catCols(activeCats().length)}">${activeCats().map(c => {
             const spent = spentBy[c.id] || 0;
             const pct = w.budget > 0 ? spent / w.budget : 0;
             return `<div class="cat"><div class="cat-ring">${catRing('cat-' + c.id, c.color, Math.min(1, pct))}<span>${Math.round(pct * 100)}%</span></div><b>${esc(c.name)}</b><em>${money(spent)}</em></div>`;
@@ -845,12 +847,14 @@ function homeHTML() {
         </div>
       </div>
     </div>
+    ${feedbackNote()}
   </section>`;
 }
 let stressEdit = false;   // "Change" on the one-line stress card opens the slider again
 
-// Up to four categories sit in one row; more wrap into two even rows.
-const catCols = n => (n <= 4 ? Math.max(1, n) : Math.ceil(n / 2));
+// Columns for the category rings: up to 6 in one row on wide screens (--n), up to 5 on phones (--np);
+// more wrap into two even rows.
+const catCols = n => `--n:${n <= 6 ? Math.max(1, n) : Math.ceil(n / 2)};--np:${n <= 5 ? Math.max(1, n) : Math.ceil(n / 2)}`;
 
 // The savings goal on Home: a ring that fills as on-track weeks add up, and a line that cheers them on.
 // "Every" and percent goals fill per month; "by a date" goals fill toward the total.
@@ -960,6 +964,7 @@ function dealsHTML() {
         <div class="more"><button class="link" data-sheet="deals">See all deals &rarr;</button><span class="s-mono" data-more-count></span></div>
       </div>
     </div>
+    ${feedbackNote()}
   </section>`;
 }
 
@@ -995,6 +1000,37 @@ function dueSurvey() {
   if (d >= 13 && !s.surveys.midpoint && !s.surveys.final) return 'midpoint';
   return null;
 }
+// Recap's "Where your money's headed": money left to spend this semester if they stick to the plan (dashed)
+// vs at the pace they're actually spending (solid), from today to the semester end, plus one plain sentence.
+function projectionHTML() {
+  const s = S(), now = store.now();
+  const p = B.projection(s, now);
+  if (!p || p.weeks < 1) return '';
+  const end = dateText(s.setup.semesterEnd);
+  const head = `<div class="card-head"><b>Where your money's headed</b><span class="s-mono">Today → ${end}</span></div>`;
+  if (p.pace == null) return `<div class="card proj">${head}<p class="s-soft">Log purchases for a few days and we'll show where your money's headed by ${end}.</p></div>`;
+  const W = 300, H = 110, L = 4, R = 4, T = 8, Bm = 8;
+  const lo = Math.min(0, ...p.points.map(x => x.pace)), hi = Math.max(p.start, 1);
+  const X = t => L + (t / p.weeks) * (W - L - R), Y = v => T + (hi - v) / (hi - lo) * (H - T - Bm);
+  const line = key => p.points.map(x => `${X(x.t).toFixed(1)},${Y(x[key]).toFixed(1)}`).join(' ');
+  const short = p.runOut != null;
+  const diff = Math.round(p.pace - p.plan);
+  const sentence = short
+    ? `At about ${money(p.pace)} a week you'd run out around ${dateText(B.dateKey(p.runOut))}, ${daysText(B.daysBetween(p.runOut, B.parseKey(s.setup.semesterEnd)))} early. ${money(Math.ceil(p.pace - p.start / p.weeks))} less a week gets you there.`
+    : diff > 0
+      ? `At about ${money(p.pace)} a week you'll make it to ${end} with ${money(p.endLeft)} to spare.`
+      : `At about ${money(p.pace)} a week you'll finish ${end} with about ${money(p.endLeft)} extra. Nice.`;
+  return `<div class="card proj">${head}
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+      ${lo < 0 ? `<line x1="${L}" x2="${W - R}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}" class="proj-zero"/>` : ''}
+      <polyline points="${line('plan')}" class="proj-plan"/>
+      <polyline points="${line('pace')}" class="proj-pace${short ? ' short' : ''}"/>
+    </svg>
+    <div class="proj-key"><span><i class="k-pace${short ? ' short' : ''}"></i>Your pace</span><span><i class="k-plan"></i>Plan ${money(p.plan)}/wk</span><span class="proj-end">${money(p.start)} today</span></div>
+    <p class="proj-say${short ? ' short' : ''}">${esc(sentence)}</p>
+  </div>`;
+}
+
 function recapHTML() {
   const s = S();
   const now = store.now();
@@ -1029,6 +1065,7 @@ function recapHTML() {
   return `<section class="view" data-view="recap" aria-label="Recap">
     ${vhead(`${kind === 'first' ? 'This week' : kind === 'closing' ? 'Tonight' : 'Last week'} &middot; ${weekRange(wk)}`, 'Your week, recapped')}
     <div class="grid2">
+      <div class="lcol">
       <div class="card recap-hero">
         <div class="recap-rings">
           ${ringSVG('recap-' + wk, Math.min(1, w.pct), seal)}
@@ -1038,6 +1075,8 @@ function recapHTML() {
         <div><h4>${head}</h4><span class="s-soft">${sub}</span>
           ${kind === 'closing' ? '' : `<span class="recap-next">${kind === 'first' ? "It's ready Sunday at 6 pm, and you'll get a notification in the app when it is." : "Next recap: Sunday at 6 pm. You'll get a notification in the app when it's ready."}</span>`}
           <div class="only-portrait-block" style="margin-top:.6em">${streakPill()}</div></div>
+      </div>
+      ${projectionHTML()}
       </div>
       <div class="stack">
         <div class="card streak-card">
@@ -1057,6 +1096,7 @@ function recapHTML() {
         : `<div class="card tip"><div class="card-head"><b>Quote of the day</b></div><p>“${esc(quote.text)}”</p><span class="s-soft quote-by">${esc(quote.by)}</span></div>`}
       </div>
     </div>
+    ${feedbackNote()}
   </section>`;
 }
 

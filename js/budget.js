@@ -185,6 +185,44 @@ export function goalProgress(state, now) {
   return { weeks, total, pending, month, perWeek, projected };
 }
 
+/*
+  Where the money's headed: money left to spend for the rest of the semester (beyond bills and savings),
+  on the plan vs at the student's pace, from today to the semester end.
+  plan = their weekly number now. pace = what they actually spend per week: finished weeks with something
+  logged, compared with what those weeks allowed (so a short first week counts fairly); before any week has
+  finished, this week so far scaled to 7 days once there are at least 3 days of it (one big day would
+  otherwise look like a huge weekly pace). null pace = not enough to go on yet.
+  Returns {weeks, plan, pace, start, endLeft, runOut (date or null), points: [{t (weeks from now), plan, pace}]}.
+*/
+export function projection(state, now) {
+  const setup = state.setup;
+  if (!setup || !setup.semesterEnd) return null;
+  const weeks = Math.max(0, (daysBetween(now, parseKey(setup.semesterEnd)) + 1) / 7);
+  const plan = weeklyFor(state.budgetHistory || [], weekKey(now));
+  const done = closedWeeks(state, now).filter(w => w.logged > 0 && w.budget > 0);
+  let pace = null;
+  if (done.length) {
+    pace = plan * done.reduce((t, w) => t + w.spent, 0) / done.reduce((t, w) => t + w.budget, 0);
+  } else {
+    const wk = weekKey(now);
+    const spent = spentInWeek(state.tx || [], wk);
+    const from = setup.startDate && setup.startDate > wk ? parseKey(setup.startDate) : parseKey(wk);
+    const days = Math.max(1, daysBetween(from, now) + 1);
+    if (spent > 0 && days >= 3) pace = spent / days * 7;
+  }
+  const start = plan * weeks;
+  const at = (rate, t) => start - rate * t;
+  const steps = Math.max(1, Math.ceil(weeks));
+  const points = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = Math.min(i, weeks);
+    points.push({ t, plan: at(plan, t), pace: pace == null ? null : at(pace, t) });
+  }
+  const endLeft = pace == null ? null : at(pace, weeks);
+  const runOut = pace > 0 && endLeft < 0 ? addDays(startOfDay(now), Math.floor(start / pace * 7)) : null;
+  return { weeks, plan, pace, start, endLeft, runOut, points };
+}
+
 export function spentInWeek(tx, wk) {
   return tx.reduce((t, x) => (weekKey(new Date(x.at)) === wk ? t + x.amount : t), 0);
 }
