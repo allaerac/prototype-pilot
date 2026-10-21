@@ -1,8 +1,8 @@
 // Usernames with no password (supabase/schema.sql: pilot_users and the pilot_* functions).
 // A username links a student's events across phones, and the phone keeps a backup under it,
 // so logging in on a wiped phone brings their setup and purchases back.
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=26';
-import * as store from './store.js?v=26';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=40';
+import * as store from './store.js?v=40';
 
 export const USERNAME_OK = /^[a-z0-9_.]{3,20}$/;
 export const cleanUsername = v => v.toLowerCase().replace(/[^a-z0-9_.]/g, '').slice(0, 20);

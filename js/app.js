@@ -1,11 +1,11 @@
 // Prototype pilot app: setup, Home (ring + quick-log), Deals, Recap, sheets and limit alerts.
 // Rendering is plain template strings. State lives in store.js; pilot events go through track.js.
-import * as store from './store.js?v=26';
-import { track, flush, pending, groupOn, dropGroup, tagQueue } from './track.js?v=26';
-import * as account from './account.js?v=26';
-import * as B from './budget.js?v=26';
-import { APP_VERSION } from './config.js?v=26';
-import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING, DEALS, QUOTES } from './content.js?v=26';
+import * as store from './store.js?v=40';
+import { track, flush, groupOn, dropGroup, tagQueue } from './track.js?v=40';
+import * as account from './account.js?v=40';
+import * as B from './budget.js?v=40';
+import { APP_VERSION } from './config.js?v=40';
+import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING, DEALS, QUOTES } from './content.js?v=40';
 
 const S = store.get;
 const app = document.getElementById('app');
@@ -84,6 +84,43 @@ function reveal(el) {
   if (!el) return;
   void el.offsetWidth;
   el.classList.add('on');
+}
+
+// Nothing ever scrolls. If a screen's content is taller than its space, the whole screen shrinks a step at a
+// time until it fits (every size in the app is in em, so it all scales together). Body text never goes below
+// 12px; small labels keep their own 11px floor in the CSS.
+function fitScale(box, scroller, over) {
+  if (!box || !scroller) return;
+  box.style.fontSize = '';
+  const base = parseFloat(getComputedStyle(box).fontSize);
+  const floor = Math.max(0.6, 12 / base);
+  const tooTall = over || (() => scroller.scrollHeight > scroller.clientHeight + 1);
+  let k = 1;
+  while (tooTall() && k > floor) {
+    k = Math.max(floor, k - 0.03);
+    box.style.fontSize = (base * k).toFixed(2) + 'px';
+  }
+}
+function fitAll() {
+  if (mode === 'setup') {
+    const v = viewsEl.querySelector('.v-setup');
+    if (v) fitScale(v, v.querySelector('.setup-body'));
+  } else {
+    const v = viewsEl.querySelector('.view.on, .view');
+    if (v) {
+      v.style.fontSize = ''; v.style.paddingBottom = '';
+      v.style.paddingBottom = getComputedStyle(v).paddingBottom;   // the tab bar doesn't shrink, so its space can't either
+      // too tall = anything reaching into the space kept free for the tab bar
+      const over = () => {
+        const limit = v.getBoundingClientRect().bottom - parseFloat(v.style.paddingBottom) + 1;
+        return [...v.querySelectorAll('.vhead, .card, .view-note, .rtabs, .nudge')].some(e => e.getBoundingClientRect().bottom > limit);
+      };
+      fitLists(); fitScale(v, v, over);
+    }
+  }
+  const body = sheet && sheetEl.querySelector('.sheet-body');
+  if (sheet && !(body && body.classList.contains('scrolls'))) fitScale(sheetEl, body || sheetEl);
+  fitLists();
 }
 
 // Lists show as many whole rows as fit in their card; the rest sit behind "See all".
@@ -409,22 +446,22 @@ function setupBody(name) {
       <span class="money-in"><span>${pre}</span><input id="goal-${key}" data-goalf="${key}" inputmode="decimal" autocomplete="off" placeholder="0" value="${esc(g[key])}" ${attrs}>${post ? `<span>${post}</span>` : ''}</span></div>`;
     let how = '';
     if (g.kind === 'every') {
-      how = `${field('How much', 'amount', '$', '')}
-        <div class="freqs">${BILL_FREQS.map(f => `<button class="chip${g.freq === f.id ? ' sel' : ''}" data-goalfreq="${f.id}">${f.name}</button>`).join('')}</div></div>`;
+      how = `<div class="money-row"><div class="row"><label for="goal-amount">How much</label>
+        <span class="money-in"><span>$</span><input id="goal-amount" data-goalf="amount" inputmode="decimal" autocomplete="off" placeholder="0" value="${esc(g.amount)}"></span>
+        <select class="freq-sel" data-goalfreqsel aria-label="How often">${BILL_FREQS.map(f => `<option value="${f.id}"${g.freq === f.id ? ' selected' : ''}>${f.name}</option>`).join('')}</select></div></div>`;
     } else if (g.kind === 'by') {
       how = `${field('Total', 'target', '$', '')}</div>
         <div class="money-row"><div class="row"><label for="goal-date">By</label>
           <input type="date" id="goal-date" class="date-in small" data-goaldate value="${esc(g.date)}" min="${B.dateKey(B.addDays(now, 7))}"></div></div>`;
     } else {
-      how = `${field('Of my money', 'pct', '', '%')}
-        <div class="freqs">${[5, 10, 20, 30].map(p => `<button class="chip${Number(g.pct) === p ? ' sel' : ''}" data-goalpct="${p}">${p}%</button>`).join('')}</div></div>`;
+      how = `${field('Of my money', 'pct', '', '%')}</div>`;
     }
     return `<span class="s-mono when">Optional, but it's the fun part</span>
       <h3>What are we saving for?</h3>
-      <p class="sub">We set it aside before you spend. Stay on track each week and watch it fill up.</p>
+      <p class="sub">We set it aside before you spend. Stay on track and watch it fill up.</p>
       <div class="money-row"><div class="row"><label for="goalname">Goal</label>
         <span class="money-in user-in"><input id="goalname" data-goalname maxlength="24" autocomplete="off" placeholder="Name it" value="${esc(g.name)}"></span></div>
-        <div class="freqs">${GOAL_IDEAS.map(n => `<button class="chip${g.name === n ? ' sel' : ''}" data-goalpick="${esc(n)}">${esc(n)}</button>`).join('')}</div></div>
+        ${g.name.trim() ? '' : `<div class="freqs">${GOAL_IDEAS.map(n => `<button class="chip${g.name === n ? ' sel' : ''}" data-goalpick="${esc(n)}">${esc(n)}</button>`).join('')}</div>`}</div>
       <div class="chips">${[['every', '$ every week or month'], ['by', '$ by a date'], ['percent', '% of my money']].map(([k, label]) => `<button class="chip${g.kind === k ? ' sel' : ''}" data-goalkind="${k}">${label}</button>`).join('')}</div>
       ${how}
       <div data-goal-preview>${goalPreview()}</div>`;
@@ -435,31 +472,32 @@ function setupBody(name) {
     const removed = draft.categories.filter(c => !draft.order.includes(c.id));
     return `<span class="s-mono when">Your ${money(draft.splitBase)} a week</span>
       <h3>Split up your week</h3>
-      <p class="sub">Every amount here is per week, Monday to Sunday. Put what matters most at the top: if you go over in one, the ones at the bottom shrink first.</p>
-      <div class="money-rows">${draft.order.map((id, i) => {
+      <p class="sub">Amounts are per week. Most important at the top: if you go over in one, the ones at the bottom shrink first.</p>
+      <div class="money-rows split-rows">${draft.order.map((id, i) => {
         const c = cat(id);
-        return `<div class="money-row">
-          <div class="row"><label for="cat-${id}"><span class="rank">${i + 1}</span>${esc(c.name)}</label>
-            <span class="moves">
+        // one line per category: amounts by default, ↑ ↓ ✕ while reordering
+        return `<div class="money-row split-row">
+          <label for="cat-${id}"><span class="rank">${i + 1}</span><span class="nm">${esc(c.name)}</span></label>
+          ${draft.reorder ? `<span class="moves">
               <button class="x" data-move="${id}:-1" aria-label="Move ${esc(c.name)} up" ${i === 0 ? 'disabled' : ''}>&uarr;</button>
               <button class="x" data-move="${id}:1" aria-label="Move ${esc(c.name)} down" ${i === draft.order.length - 1 ? 'disabled' : ''}>&darr;</button>
-              ${draft.order.length > 1 ? `<button class="x" data-cat-rm="${id}" aria-label="Remove ${esc(c.name)}">${xIcon}</button>` : ''}
-            </span></div>
-          <div class="row split-amt">
+              <button class="x" data-cat-rm="${id}" aria-label="Remove ${esc(c.name)}" ${draft.order.length > 1 ? '' : 'disabled'}>${xIcon}</button>
+            </span>` : `<span class="split-amt">
             <button class="x" data-catadj="${id}:-1" aria-label="$1 less a week for ${esc(c.name)}">−</button>
-            <span class="money-in"><span>$</span><input id="cat-${id}" data-catamt="${id}" inputmode="numeric" autocomplete="off" placeholder="0" value="${esc(draft.cats[id])}"><span>/wk</span></span>
+            <span class="money-in"><span>$</span><input id="cat-${id}" data-catamt="${id}" inputmode="numeric" autocomplete="off" placeholder="0" value="${esc(draft.cats[id])}"></span>
             <button class="x" data-catadj="${id}:1" aria-label="$1 more a week for ${esc(c.name)}">+</button>
-          </div>
+          </span>`}
         </div>`;
       }).join('')}</div>
       ${draft.newCat !== null ? `<div class="money-row"><div class="row">
           <span class="money-in user-in"><input id="newcat" data-newcat maxlength="18" autocomplete="off" enterkeyhint="done" placeholder="Like Coffee, Gas or Gifts" value="${esc(draft.newCat)}"></span>
           <button class="chip sel" data-newcat-save>Add</button></div></div>` : ''}
       <div class="chips">
-        ${removed.map(c => `<button class="chip" data-cat-add="${c.id}">+ ${esc(c.name)}</button>`).join('')}
-        ${draft.newCat === null && draft.order.length < 8 ? `<button class="chip" data-newcat-open>+ New category</button>` : ''}
-      </div>
-      ${draft.splitEdited ? `<button class="text-btn" data-resplit>Use the suggested split</button>` : ''}`;
+        <button class="chip${draft.reorder ? ' sel' : ''}" data-reorder>${draft.reorder ? 'Done' : 'Reorder or remove'}</button>
+        ${draft.order.length < 6 ? removed.map(c => `<button class="chip" data-cat-add="${c.id}">+ ${esc(c.name)}</button>`).join('') : ''}
+        ${draft.newCat === null && draft.order.length < 6 ? `<button class="chip" data-newcat-open>+ New</button>` : ''}
+        ${draft.splitEdited ? `<button class="chip" data-resplit>Use our split</button>` : ''}
+      </div>`;
   }
   if (name === 'end') {
     return `<h3>When does your semester end?</h3>
@@ -496,7 +534,7 @@ function setupBody(name) {
         ${g ? '' : `<button class="text-btn add-goal" data-goto-goal>Saving for something? Add a goal &rarr;</button>`}
       </div>
       <div data-r-impact>${bits.impact}</div>
-      <div class="breakdown" data-r-breakdown>${bits.breakdown}</div>
+      <button class="link how-link" data-sheet="math">How we got this number &rarr;</button>
       ${r.weekly <= 0 ? `<p class="note">Your bills use up most of what's coming in. Let's double-check the numbers.</p>`
         : bits.firstWeek !== null ? `<p class="s-soft" data-r-first>This week is shorter, so it starts at ${money(bits.firstWeek)} for ${SHORT[now.getDay()]}–Sun.</p>` : ''}`;
   }
@@ -528,13 +566,11 @@ function goalPreview() {
   if (save >= gross) return `<p class="note">That's more than you have each week. Try a smaller amount${g.kind === 'by' ? ' or a later date' : ''}.</p>`;
   const base = draft.cats && draft.splitBase ? draft.cats : B.suggestSplit(draft.order, beforeSpend);
   const before = B.scaleSplit(draft.order, base, beforeSpend), after = B.scaleSplit(draft.order, base, spend);
-  const name = id => (draft.categories.find(c => c.id === id) || catOf(id)).name;
-  const row = (k, a, b) => `<div class="set-row"><span class="s-soft">${esc(k)}</span><b>${money(a)} <span class="arrow">&rarr;</span> ${money(b)}</b></div>`;
-  return `<div class="breakdown">
-    <span class="s-mono">What it changes, per week</span>
+  const cat = id => draft.categories.find(c => c.id === id) || catOf(id);
+  return `<div class="breakdown goal-impact">
     <div class="set-row total"><span>Set aside for ${esc(g.name)}</span><b>${money(save)}/wk <small>about ${money(save * 52 / 12)}/mo</small></b></div>
-    ${row('Your weekly number', beforeSpend, spend)}
-    ${draft.order.map(id => row(name(id), before[id], after[id])).join('')}
+    <div class="set-row"><span class="s-soft">Your weekly number</span><b>${money(beforeSpend)} <span class="arrow">&rarr;</span> ${money(spend)}</b></div>
+    <div class="cat-deltas">${draft.order.map(id => `<span><i style="background:${cat(id).color}"></i>${esc(cat(id).name)} <b>${money(before[id])}&rarr;${money(after[id])}</b></span>`).join('')}</div>
   </div>`;
 }
 // The parts of the weekly-number screen that change while they slide: the number, the line under it,
@@ -573,6 +609,9 @@ function refreshResult() {
   viewsEl.querySelectorAll('[data-pace]').forEach(b => b.classList.toggle('sel', Number(b.dataset.paceV) === save));
   const range = viewsEl.querySelector('[data-save]');
   if (range && p.hi > p.lo) range.style.setProperty('--v', ((save - p.lo) / (p.hi - p.lo) * 100).toFixed(1) + '%');
+  // refit only if the new wording no longer fits, so the slider doesn't jump around mid-drag
+  const body = viewsEl.querySelector('.setup-body');
+  if (body && body.scrollHeight > body.clientHeight + 1) fitAll();
 }
 
 function refreshGoalPreview() {
@@ -594,11 +633,12 @@ function moneyRows(kind, rows, types, freqs) {
   return `<div class="money-rows">${rows.map(x => {
     const n = seen[x.type] = (seen[x.type] || 0) + 1;
     const name = ((types.find(t => t.id === x.type) || {}).name || 'Other') + (n > 1 ? ' ' + n : '');
+    // one line: name, amount, how often (a dropdown), remove; it wraps on very narrow screens
     return `<div class="money-row">
       <div class="row"><label for="${kind}-${x.key}">${esc(name)}</label>
         <span class="money-in"><span>$</span><input id="${kind}-${x.key}" data-amt="${kind}:${x.key}" inputmode="decimal" autocomplete="off" placeholder="0" value="${esc(x.amount)}"></span>
+        <select class="freq-sel" data-freqsel="${kind}:${x.key}" aria-label="How often for ${esc(name)}">${freqs.map(f => `<option value="${f.id}"${x.freq === f.id ? ' selected' : ''}>${f.name}</option>`).join('')}</select>
         <button class="x" data-rm="${kind}:${x.key}" aria-label="Remove ${esc(name)}">${xIcon}</button></div>
-      <div class="freqs">${freqs.map(f => `<button class="chip${x.freq === f.id ? ' sel' : ''}" data-freq="${kind}:${x.key}:${f.id}">${f.name}</button>`).join('')}</div>
     </div>`;
   }).join('')}</div>`;
 }
@@ -639,10 +679,12 @@ function renderSetup(animate) {
     <div class="setup-foot">${setupFoot(name)}</div>
   </section>`;
   if (animate) reveal(viewsEl.firstElementChild);
+  fitAll();
 }
 function refreshSetupFoot() {
   const foot = viewsEl.querySelector('.setup-foot');
   if (foot) foot.innerHTML = setupFoot(steps()[step]);
+  fitAll();
 }
 
 async function nextStep() {
@@ -840,9 +882,8 @@ function homeHTML() {
           }).join('')}</div>`}
         </div>
         <div class="card fill">
-          <div class="card-head"><b>Logged this week</b><span class="s-mono">${items.length} ${items.length === 1 ? 'purchase' : 'purchases'}</span></div>
-          ${items.length ? `<div class="list" data-fit>${rows}</div>
-            <div class="more"><button class="link" data-sheet="purchases">See all purchases &rarr;</button><span class="s-mono" data-more-count></span></div>`
+          <div class="card-head"><b>Logged this week <span class="s-mono">${items.length}</span></b>${items.length ? `<button class="link" data-sheet="purchases">See all &rarr;</button>` : ''}</div>
+          ${items.length ? `<div class="list scrolls">${rows}</div>`
           : `<div class="empty"><b>Nothing logged yet</b><span class="s-soft">Tap + after you buy something. It takes 5 seconds.</span></div>`}
         </div>
       </div>
@@ -893,9 +934,11 @@ function stressCardHTML() {
       <button class="link" data-stress-edit>Change</button>
     </div>`;
   }
+  // one line: label, slider, value, Save (it wraps only on very narrow screens)
   return `<div class="card stress-card">
-    <div class="card-head"><b>Money stress today</b><span class="row"><span class="s-mono">${answered ? v + '%' : 'Chill → stressed'}</span><button class="chip sel stress-save" data-stress-save>Save</button></span></div>
-    <input type="range" class="stress-range${answered ? ' set' : ''}" min="0" max="100" step="1" value="${answered ? v : 50}" data-stressday aria-label="How stressed about money are you today, 0 to 100" style="--v:${answered ? v : 50}%">
+    <div class="stress-line"><b>Money stress</b>
+      <input type="range" class="stress-range${answered ? ' set' : ''}" min="0" max="100" step="1" value="${answered ? v : 50}" data-stressday aria-label="How stressed about money are you today, from chill (0) to super stressed (100)" style="--v:${answered ? v : 50}%">
+      <span class="s-mono sval">${answered ? v + '%' : '–'}</span><button class="chip sel stress-save" data-stress-save>Save</button></div>
     <div class="scale-ends"><span>Chill</span><span>Super stressed</span></div>
   </div>`;
 }
@@ -1005,10 +1048,10 @@ function dueSurvey() {
 function projectionHTML() {
   const s = S(), now = store.now();
   const p = B.projection(s, now);
-  if (!p || p.weeks < 1) return '';
+  if (!p || p.weeks < 1) return `<div class="proj"><div class="card-head"><b>Where your money's headed</b></div><p class="s-soft">The semester's almost over, so there's nothing left to project.</p></div>`;
   const end = dateText(s.setup.semesterEnd);
   const head = `<div class="card-head"><b>Where your money's headed</b><span class="s-mono">Today → ${end}</span></div>`;
-  if (p.pace == null) return `<div class="card proj">${head}<p class="s-soft">Log purchases for a few days and we'll show where your money's headed by ${end}.</p></div>`;
+  if (p.pace == null) return `<div class="proj">${head}<p class="s-soft">Log purchases for a few days and we'll show where your money's headed by ${end}.</p></div>`;
   const W = 300, H = 110, L = 4, R = 4, T = 8, Bm = 8;
   const lo = Math.min(0, ...p.points.map(x => x.pace)), hi = Math.max(p.start, 1);
   const X = t => L + (t / p.weeks) * (W - L - R), Y = v => T + (hi - v) / (hi - lo) * (H - T - Bm);
@@ -1020,7 +1063,7 @@ function projectionHTML() {
     : diff > 0
       ? `At about ${money(p.pace)} a week you'll make it to ${end} with ${money(p.endLeft)} to spare.`
       : `At about ${money(p.pace)} a week you'll finish ${end} with about ${money(p.endLeft)} extra. Nice.`;
-  return `<div class="card proj">${head}
+  return `<div class="proj">${head}
     <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
       ${lo < 0 ? `<line x1="${L}" x2="${W - R}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}" class="proj-zero"/>` : ''}
       <polyline points="${line('plan')}" class="proj-plan"/>
@@ -1030,6 +1073,10 @@ function projectionHTML() {
     <p class="proj-say${short ? ' short' : ''}">${esc(sentence)}</p>
   </div>`;
 }
+
+// Recap's right side shows one card at a time
+const RECAP_TABS = [['spent', 'Spending'], ['headed', 'Headed'], ['stress', 'Stress'], ['quote', 'Quote']];
+let rtab = 'spent';
 
 function recapHTML() {
   const s = S();
@@ -1064,8 +1111,7 @@ function recapHTML() {
   stress.change = stress.avg != null && before.avg != null ? stress.avg - before.avg : null;
   return `<section class="view" data-view="recap" aria-label="Recap">
     ${vhead(`${kind === 'first' ? 'This week' : kind === 'closing' ? 'Tonight' : 'Last week'} &middot; ${weekRange(wk)}`, 'Your week, recapped')}
-    <div class="grid2">
-      <div class="lcol">
+    <div class="grid2 recap-grid">
       <div class="card recap-hero">
         <div class="recap-rings">
           ${ringSVG('recap-' + wk, Math.min(1, w.pct), seal)}
@@ -1076,24 +1122,21 @@ function recapHTML() {
           ${kind === 'closing' ? '' : `<span class="recap-next">${kind === 'first' ? "It's ready Sunday at 6 pm, and you'll get a notification in the app when it is." : "Next recap: Sunday at 6 pm. You'll get a notification in the app when it's ready."}</span>`}
           <div class="only-portrait-block" style="margin-top:.6em">${streakPill()}</div></div>
       </div>
-      ${projectionHTML()}
-      </div>
-      <div class="stack">
-        <div class="card streak-card">
-          <div class="card-head"><b>Streak</b><span class="s-mono">${n} ${n === 1 ? 'week' : 'weeks'} in a row</span></div>
-          <div class="weeks">${closed.map(c => (B.counts(c) ? miniRing(0) : faintRing)).join('')}${kind === 'closing' ? (under && w.items.length ? miniRing(0) : faintRing) : dashedRing}</div>
-        </div>
-        <div class="card">
+      <div class="rcol">
+        ${survey ? `<button class="nudge" data-sheet="survey"><span><b>Got 30 seconds?</b> <span class="s-soft">Tell us how the app is going.</span></span><span aria-hidden="true">&rarr;</span></button>` : ''}
+        <div class="chips rtabs" role="tablist">${RECAP_TABS.map(([id, label]) => `<button class="chip${rtab === id ? ' sel' : ''}" role="tab" aria-selected="${rtab === id}" data-rtab="${id}">${label}</button>`).join('')}</div>
+        <div class="card rpanel" role="tabpanel">${rtab === 'spent' ? `
           <div class="card-head"><b>Where it went</b><span class="s-mono">${money(total)} total</span></div>
           <div class="bar">${total > 0 ? shownCats.map(c => w.spentBy[c.id] > 0 ? `<span style="width:${(w.spentBy[c.id] / total * 100).toFixed(1)}%;background:${c.color}"></span>` : '').join('') : ''}</div>
           <div class="legend">${shownCats.map(c => `<div><i style="background:${c.color}"></i>${esc(c.name)}<b>${money(w.spentBy[c.id] || 0)}</b></div>`).join('')}</div>
+          <div class="card-head streak-head"><b>Streak</b><span class="s-mono">${n} ${n === 1 ? 'week' : 'weeks'} in a row</span></div>
+          <div class="weeks">${closed.map(c => (B.counts(c) ? miniRing(0) : faintRing)).join('')}${kind === 'closing' ? (under && w.items.length ? miniRing(0) : faintRing) : dashedRing}</div>`
+        : rtab === 'headed' ? projectionHTML()
+        : rtab === 'stress' ? `
+          <div class="card-head"><b>Money stress</b><span class="s-mono">${stress.avg == null ? 'Answer on Home each day' : `${stress.avg}% average`}${stress.change != null && stress.change !== 0 ? ` · ${stress.change < 0 ? 'down' : 'up'} ${Math.abs(stress.change)} from last week` : ''}</span></div>
+          <div class="stress-week">${stress.days.map(d => `<div><i style="--v:${d.v == null ? 0 : d.v}%" class="${d.v == null ? 'none' : ''}"></i><span>${d.label}</span></div>`).join('')}</div>`
+        : `<div class="tip"><div class="card-head"><b>Quote of the day</b></div><p>“${esc(quote.text)}”</p><span class="s-soft quote-by">${esc(quote.by)}</span></div>`}
         </div>
-        <div class="card">
-          <div class="card-head"><b>Money stress</b><span class="s-mono">${stress.avg == null ? 'Answer on Home each day' : `${stress.avg}% average`}${stress.change != null && stress.change !== 0 ? ` · ${stress.change < 0 ? 'down' : 'up'} ${Math.abs(stress.change)} from the week before` : ''}</span></div>
-          <div class="stress-week">${stress.days.map(d => `<div><i style="--v:${d.v == null ? 0 : d.v}%" class="${d.v == null ? 'none' : ''}"></i><span>${d.label}</span></div>`).join('')}</div>
-        </div>
-        ${survey ? `<button class="nudge" data-sheet="survey"><span><b>Got 30 seconds?</b><br><span class="s-soft">Tell us how the app is going.</span></span><span aria-hidden="true">&rarr;</span></button>`
-        : `<div class="card tip"><div class="card-head"><b>Quote of the day</b></div><p>“${esc(quote.text)}”</p><span class="s-soft quote-by">${esc(quote.by)}</span></div>`}
       </div>
     </div>
     ${feedbackNote()}
@@ -1112,8 +1155,8 @@ function renderApp(animate) {
     b.setAttribute('aria-current', on ? 'page' : 'false');
   });
   animateRings(view);
-  fitLists();
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitLists);
+  fitAll();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitAll);
 }
 
 function enterApp(t) {
@@ -1138,10 +1181,13 @@ let logDraft = null;
 let txOpen = null;
 let confirmDel = false;
 let confirmReset = false;
+let openTrack = null;   // the "What we collect" group that's open (one at a time)
+let dealDay = null;     // the day the All deals sheet is showing
 let surveyDraft = {};
 
 function openSheet(name, arg) {
   sheet = name;
+  if (name === 'data') openTrack = null;
   if (name === 'log') {
     const last = S().tx[S().tx.length - 1];
     const active = activeCats();
@@ -1193,7 +1239,7 @@ function renderSheet() {
     s.tx.slice().sort((a, b) => (a.at < b.at ? 1 : -1)).forEach(x => { (groups[B.weekKey(new Date(x.at))] ||= []).push(x); });
     const cur = B.weekKey(store.now());
     html = `${sheetHead('All purchases')}
-      <div class="sheet-body">${Object.keys(groups).length ? Object.keys(groups).map(wk => `
+      <div class="sheet-body scrolls">${Object.keys(groups).length ? Object.keys(groups).map(wk => `
         <span class="s-mono group-label">${wk === cur ? 'This week' : 'Week of ' + weekRange(wk)} &middot; ${money(groups[wk].reduce((t, x) => t + x.amount, 0), true)}</span>
         <div>${groups[wk].map(txRow).join('')}</div>`).join('') : '<p class="s-soft">Nothing logged yet.</p>'}</div>`;
   } else if (sheet === 'tx') {
@@ -1216,46 +1262,52 @@ function renderSheet() {
   } else if (sheet === 'deals') {
     const today = store.now().getDay();
     const all = visibleDeals().filter(d => dealFilter === 'all' || d.cat === dealFilter);
+    // one day at a time, so the list never has to scroll
+    const days = [1, 2, 3, 4, 5, 6, 0].filter(day => all.some(d => d.cat !== 'national' && d.days.includes(day)));
+    const tabs = [...days.map(String), ...(all.some(d => d.cat === 'national') ? ['national'] : [])];
+    if (!tabs.includes(dealDay)) dealDay = tabs.includes(String(today)) ? String(today) : tabs[0];
+    const list = dealDay === 'national' ? all.filter(d => d.cat === 'national') : all.filter(d => d.cat !== 'national' && d.days.includes(Number(dealDay)));
     html = `${sheetHead('All deals')}
-      <div class="sheet-body">${[1, 2, 3, 4, 5, 6, 0].map(day => {
-        const list = all.filter(d => d.cat !== 'national' && d.days.includes(day));
-        return list.length ? `<span class="s-mono group-label">${DAYS[day]}${day === today ? ' · today' : ''}</span><div>${list.map(dealRow).join('')}</div>` : '';
-      }).join('')}
-      ${all.some(d => d.cat === 'national') ? `<span class="s-mono group-label">National</span><div>${all.filter(d => d.cat === 'national').map(dealRow).join('')}</div>` : ''}</div>`;
+      <div class="chips day-tabs">${tabs.map(t => `<button class="chip${dealDay === t ? ' sel' : ''}" data-dealday="${t}">${t === 'national' ? 'National' : SHORT[Number(t)] + (Number(t) === today ? ' · today' : '')}</button>`).join('')}</div>
+      <div class="sheet-body">${list.length ? `<div>${list.map(dealRow).join('')}</div>` : '<p class="s-soft">No deals that day.</p>'}</div>`;
   } else if (sheet === 'settings') {
     const wk = B.weekKey(store.now());
-    const n = pending();
-    html = `${sheetHead('Settings')}
+    const end = s.setup ? dateText(s.setup.semesterEnd) : '—';
+    html = `<div class="sheet-head"><div><h4 id="sheetTitle">Settings</h4><span class="s-soft sheet-sub">${s.username ? '@' + esc(s.username) + ' &middot; ' : ''}${esc(APP_NAME)} ${APP_VERSION}</span></div><button class="x" data-close aria-label="Close">${xIcon}</button></div>
       <div class="sheet-body">
-        <div>
-          <div class="set-row"><div><span>Weekly number</span><small>${money(B.weeklyFor(s.budgetHistory, wk))} a week until ${s.setup ? MONTHS[B.parseKey(s.setup.semesterEnd).getMonth()] + ' ' + B.parseKey(s.setup.semesterEnd).getDate() : '—'}</small></div><button class="chip" data-redo>Redo setup</button></div>
-          ${s.setup ? `<div class="set-row"><div><span>Category split</span><small>${activeCats().map(c => esc(c.name)).join(' › ')}</small></div><button class="chip" data-resplit-open>Change split</button></div>` : ''}
-          ${s.setup ? `<div class="set-row"><div><span>Savings goal</span><small>${s.setup.goal ? `${esc(s.setup.goal.name)} · ${money(s.setup.goal.perWeek)} a week` : 'Nothing yet. Pick something to save for'}</small></div><button class="chip" data-goal-open>${s.setup.goal ? 'Change goal' : 'Set a goal'}</button></div>` : ''}
-          <div class="set-row"><div><span>Show 21+ deals</span><small>Drink specials at Uptown bars</small></div><button class="switch" role="switch" aria-checked="${s.prefs.show21}" data-toggle21><i aria-hidden="true"></i></button></div>
-          ${s.username ? `<div class="set-row"><div><span>@${esc(s.username)}</span><small>Log in with this username on any phone. No password.</small></div></div>
-          <div class="set-row"><div><span>Back up to your username</span><small>So logging in brings your budget back. Purchase notes stay on this phone.</small></div><button class="switch" role="switch" aria-checked="${account.backupOn(s)}" data-backup><i aria-hidden="true"></i></button></div>` : ''}
-          <div class="set-row"><div><span>Share usage with the ESP201 team</span><small>Random ID ${esc(s.anonId.slice(0, 8))}${n ? ` · ${n} waiting to send` : ''}</small></div><button class="switch" role="switch" aria-checked="${!!(s.consent && s.sharing)}" data-sharing><i aria-hidden="true"></i></button></div>
-          <div class="set-row"><div><span>What we collect</span><small>${s.consent && s.sharing ? `Sharing ${TRACKING.filter(g => groupOn(s, g.id)).length} of ${TRACKING.length}. See why and turn any of it off` : 'See what it is and why we want it'}</small></div><button class="chip" data-sheet="data">See</button></div>
-          <div class="set-row"><div><span>Send feedback</span><small>Anything that's confusing, broken or missing</small></div><button class="chip" data-sheet="feedback">Write</button></div>
-          ${!isStandalone() ? `<div class="set-row"><div><span>Add to Home Screen</span><small>Keeps your data safe and opens like an app</small></div>${installPrompt ? '<button class="chip" data-install>Install</button>' : ''}</div>` : ''}
-          <div class="set-row"><div><span class="danger">Erase everything on this phone</span><small>Purchases, setup and settings</small></div><button class="chip danger" data-reset>${confirmReset ? 'Tap again' : 'Erase'}</button></div>
+        <div class="set-list">
+          <div class="set-row"><div><span>Weekly number</span><small>${money(B.weeklyFor(s.budgetHistory, wk))} a week until ${end}</small></div><button class="chip" data-redo>Redo setup</button></div>
+          ${s.setup ? `<div class="set-row"><div><span>Category split</span><small>${activeCats().map(c => esc(c.name)).join(' › ')}</small></div><button class="chip" data-resplit-open>Change</button></div>
+          <div class="set-row"><div><span>Savings goal</span><small>${s.setup.goal ? `${esc(s.setup.goal.name)} · ${money(s.setup.goal.perWeek)} a week` : 'Nothing yet'}</small></div><button class="chip" data-goal-open>${s.setup.goal ? 'Change' : 'Set one'}</button></div>` : ''}
+          <div class="set-row"><div><span>Send feedback</span><small>Questions, ideas, anything broken</small></div><button class="chip" data-sheet="feedback">Write</button></div>
+          <div class="set-row"><div><span>Share usage with the team</span><button class="link" data-sheet="data">What we collect and why${s.consent && s.sharing ? ` (${TRACKING.filter(g => groupOn(s, g.id)).length} of ${TRACKING.length} on)` : ''} &rarr;</button></div><button class="switch" role="switch" aria-checked="${!!(s.consent && s.sharing)}" aria-label="Share usage with the team" data-sharing><i aria-hidden="true"></i></button></div>
+          ${s.username ? `<div class="set-row"><div><span>Back up to @${esc(s.username)}</span><small>Log in on any phone to get it back</small></div><button class="switch" role="switch" aria-checked="${account.backupOn(s)}" aria-label="Back up to your username" data-backup><i aria-hidden="true"></i></button></div>` : ''}
+          <div class="set-row"><div><span>Show 21+ deals</span></div><button class="switch" role="switch" aria-checked="${s.prefs.show21}" aria-label="Show 21+ deals" data-toggle21><i aria-hidden="true"></i></button></div>
+          ${!isStandalone() ? `<div class="set-row"><div><span>Add to Home Screen</span><small>Keeps your data safe</small></div>${installPrompt ? '<button class="chip" data-install>Install</button>' : ''}</div>` : ''}
+          <div class="set-row"><div><span class="danger">Erase everything on this phone</span></div><button class="chip danger" data-reset>${confirmReset ? 'Tap again' : 'Erase'}</button></div>
         </div>
-        <p class="s-mono" style="text-align:center">${esc(APP_NAME)} ${APP_VERSION} &middot; ESP201 pilot</p>
       </div>`;
+  } else if (sheet === 'math') {
+    // setup's weekly-number math, from the answers being edited
+    html = `${sheetHead('How we got this')}
+      <div class="sheet-body"><div class="breakdown">${draft ? resultBits().breakdown.replace('<span class="s-mono">How we got this</span>', '') : ''}</div></div>`;
   } else if (sheet === 'data') {
     // before setup's consent step the student can already pick; after "Use it without sharing" nothing is sent
     const off = !s.sharing;
     html = `${sheetHead('What we collect')}
       <div class="sheet-body">
-        <p class="s-soft">All of it is tied to your username, never your real name. Turn off anything you don't want to share and the app works exactly the same.</p>
-        ${off ? `<p class="note">Sharing is off, so none of this gets sent right now. You can turn it back on in Settings.</p>` : ''}
-        <div>${TRACKING.map(g => `<div class="track-item">
-          <div class="row"><b>${esc(g.name)}</b><button class="switch" role="switch" aria-label="Share ${esc(g.name.toLowerCase())}" aria-checked="${!off && groupOn(s, g.id)}" data-sharepref="${g.id}" ${off ? 'disabled' : ''}><i aria-hidden="true"></i></button></div>
-          <p class="s-soft">${esc(g.what)}</p>
-          <p class="why"><span class="s-mono">Why we want it</span>${esc(g.why)}</p>
-        </div>`).join('')}</div>
-        <p class="s-soft">A few things always come through while sharing is on: check-in surveys and feedback (only when you hit send), and a heads-up when you change these switches or log in.</p>
-        <p class="s-soft">Separate from all this, your setup and purchases (not your notes) are backed up under your username so you can log back in on another phone. You can turn that off in Settings.</p>
+        <p class="s-soft data-intro">Tied to your username, never your real name. Turn off anything and the app works the same. Tap one to see what it is and why.</p>
+        ${off ? `<p class="note">Sharing is off, so none of this gets sent right now. Turn it back on in Settings.</p>` : ''}
+        <div>${TRACKING.map(g => `<div class="track-item${openTrack === g.id ? ' open' : ''}">
+          <div class="row"><button class="track-name" data-track-open="${g.id}" aria-expanded="${openTrack === g.id}">${esc(g.name)}<span aria-hidden="true">${openTrack === g.id ? '&minus;' : '+'}</span></button><button class="switch" role="switch" aria-label="Share ${esc(g.name.toLowerCase())}" aria-checked="${!off && groupOn(s, g.id)}" data-sharepref="${g.id}" ${off ? 'disabled' : ''}><i aria-hidden="true"></i></button></div>
+          ${openTrack === g.id ? `<p class="s-soft">${esc(g.what)}</p>
+          <p class="why"><span class="s-mono">Why we want it</span>${esc(g.why)}</p>` : ''}
+        </div>`).join('')}
+        <div class="track-item${openTrack === 'else' ? ' open' : ''}">
+          <div class="row"><button class="track-name" data-track-open="else" aria-expanded="${openTrack === 'else'}">What else<span aria-hidden="true">${openTrack === 'else' ? '&minus;' : '+'}</span></button></div>
+          ${openTrack === 'else' ? `<p class="s-soft">While sharing is on, check-in surveys and feedback come through (only when you hit send), plus a heads-up when you change these switches or log in.</p>
+          <p class="s-soft">Separately, your setup and purchases (not your notes) are backed up under your username so you can log back in on another phone. You can turn that off in Settings.</p>` : ''}
+        </div></div>
       </div>`;
   } else if (sheet === 'survey') {
     const id = surveyDraft.id;
@@ -1278,6 +1330,7 @@ function renderSheet() {
       : `<p class="s-soft">Feedback goes through usage sharing, which is off. Turn it on in Settings to send feedback.</p>`}`;
   }
   sheetEl.innerHTML = html;
+  fitAll();
 }
 
 function keypad(k) {
@@ -1375,7 +1428,6 @@ app.addEventListener('click', e => {
     return;
   }
   if (d.rm) { const [kind, key] = d.rm.split(':'); const rows = rowsOf(kind); rows.splice(rows.findIndex(x => x.key === key), 1); renderSetup(false); return; }
-  if (d.freq) { const [kind, key, f] = d.freq.split(':'); rowsOf(kind).find(x => x.key === key).freq = f; renderSetup(false); return; }
   if ('nobills' in d) { draft.bills = []; renderSetup(false); return; }
   if (d.move) {
     const [id, dir] = d.move.split(':');
@@ -1388,12 +1440,11 @@ app.addEventListener('click', e => {
     return;
   }
   if (d.catadj) { const [id, n] = d.catadj.split(':'); draft.cats[id] = Math.max(0, (Number(draft.cats[id]) || 0) + Number(n)); draft.splitEdited = true; renderSetup(false); return; }
+  if (d.rtab) { rtab = d.rtab; track('recap_tab', { tab: d.rtab }); renderApp(false); return; }
   if ('stressEdit' in d) { stressEdit = true; renderApp(false); return; }
   if ('stressSave' in d) { saveStress(); return; }
   if (d.goalpick) { draft.goal.name = d.goalpick; draft.noGoal = false; draft.goalTouched = true; draft.adjust = 0; renderSetup(false); return; }
   if (d.goalkind) { draft.goal.kind = d.goalkind; draft.noGoal = false; draft.goalTouched = true; draft.adjust = 0; renderSetup(false); return; }
-  if (d.goalfreq) { draft.goal.freq = d.goalfreq; draft.goalTouched = true; draft.adjust = 0; renderSetup(false); return; }
-  if (d.goalpct) { draft.goal.pct = d.goalpct; draft.goalTouched = true; draft.adjust = 0; renderSetup(false); return; }
   if ('goalSkip' in d) { draft.noGoal = true; draft.adjust = 0; nextStep(); return; }
   if (d.catRm) {
     if (draft.order.length <= 1) return;
@@ -1405,6 +1456,7 @@ app.addEventListener('click', e => {
   if (d.catAdd) { draft.order.push(d.catAdd); draft.cats[d.catAdd] = 0; afterCatChange(); return; }
   if ('newcatOpen' in d) { draft.newCat = ''; renderSetup(false); const i = document.getElementById('newcat'); if (i) i.focus(); return; }
   if ('newcatSave' in d) { addNewCat(); return; }
+  if ('reorder' in d) { draft.reorder = !draft.reorder; renderSetup(false); return; }
   if ('resplit' in d) { draft.cats = B.suggestSplit(draft.order, draft.splitBase); draft.splitEdited = false; renderSetup(false); return; }
   if ('cushion' in d) { draft.cushion = !draft.cushion; renderSetup(false); return; }
   if (d.pace) { draft.adjust = saveWeekly() - Number(d.paceV); renderSetup(false); return; }
@@ -1461,6 +1513,8 @@ app.addEventListener('click', e => {
     renderSheet();
     return;
   }
+  if (d.dealday) { dealDay = d.dealday; renderSheet(); return; }
+  if (d.trackOpen) { openTrack = openTrack === d.trackOpen ? null : d.trackOpen; renderSheet(); return; }
   if (d.sharepref) {
     const id = d.sharepref, on = !groupOn(s, id);
     store.update(st => { st.prefs.share = { ...(st.prefs.share || {}), [id]: on }; });
@@ -1500,6 +1554,16 @@ app.addEventListener('click', e => {
   }
 });
 
+// Frequency dropdowns on the income and bills screens
+app.addEventListener('change', e => {
+  const t = e.target;
+  if (t.dataset && 'goalfreqsel' in t.dataset) { draft.goal.freq = t.value; draft.goalTouched = true; draft.adjust = 0; refreshGoalPreview(); return; }
+  if (!t.dataset || !t.dataset.freqsel) return;
+  const [kind, key] = t.dataset.freqsel.split(':');
+  const row = rowsOf(kind).find(x => x.key === key);
+  if (row) { row.freq = t.value; refreshSetupFoot(); }
+});
+
 // The daily stress slider saves when they tap Save, then Home redraws (with the reminder if it's high).
 function saveStress() {
   const t = viewsEl.querySelector('[data-stressday]');
@@ -1529,7 +1593,7 @@ app.addEventListener('input', e => {
       if (label) label.textContent = t.value + '%';
       refreshSetupFoot();
     } else {
-      const label = t.closest('.stress-card').querySelector('.card-head .s-mono');
+      const label = t.closest('.stress-card').querySelector('.sval');
       if (label) label.textContent = t.value + '%';
     }
     return;
@@ -1580,7 +1644,7 @@ document.addEventListener('visibilitychange', () => {
   checkRecapReady();
 });
 setInterval(() => { refreshIfNewDay(); checkRecapReady(); }, 60000);
-addEventListener('resize', () => { if (mode === 'app') fitLists(); });
+addEventListener('resize', () => fitAll());
 
 addEventListener('beforeinstallprompt', e => {
   e.preventDefault();

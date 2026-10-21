@@ -77,7 +77,7 @@ export const TRACKING = [
     id: 'usage', name: 'When and how you use the app',
     what: 'When you open it, which tabs you look at, and if you added it to your Home Screen.',
     why: 'Just so we can see which parts people actually use and which ones nobody looks at, so we know what to keep and what to cut.',
-    events: ['app_open', 'screen_view', 'recap_view', 'recap_ready_shown', 'survey_open', 'install_prompt', 'installed']
+    events: ['app_open', 'screen_view', 'recap_view', 'recap_tab', 'recap_ready_shown', 'survey_open', 'install_prompt', 'installed']
   },
   {
     id: 'deals', name: 'Deals you check out',
