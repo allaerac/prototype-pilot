@@ -1,6 +1,6 @@
 // Run with: node app/test/budget.test.mjs
 import assert from 'node:assert/strict';
-import { computeWeekly, weekKey, budgetForWeek, closedWeeks, streak, daysLeftInWeek, suggestSplit, categoryLeft } from '../js/budget.js';
+import { computeWeekly, weekKey, budgetForWeek, closedWeeks, streak, daysLeftInWeek, suggestSplit, categoryLeft, goalWeekly, scaleSplit, goalProgress } from '../js/budget.js';
 
 const t = (name, fn) => { fn(); console.log('ok -', name); };
 
@@ -44,7 +44,12 @@ t('bills have their own frequency', () => {
 });
 t('suggested split favors the top of the order and adds up', () => {
   const cats = suggestSplit(['food', 'transport', 'shopping', 'fun'], 55);
-  assert.deepEqual(cats, { food: 22, transport: 14, shopping: 11, fun: 8 });
+  assert.deepEqual(cats, { food: 23, transport: 14, shopping: 10, fun: 8 });
+  // any number of categories, always adding up exactly
+  const six = suggestSplit(['a', 'b', 'c', 'd', 'e', 'f'], 137);
+  assert.equal(Object.values(six).reduce((t, v) => t + v, 0), 137);
+  assert.ok(six.a > six.b && six.b > six.f);
+  assert.deepEqual(suggestSplit(['solo'], 40), { solo: 40 });
 });
 t('overspending is covered by the lowest priority first', () => {
   const split = { weekly: 55, order: ['food', 'transport', 'shopping', 'fun'], cats: { food: 25, transport: 12, shopping: 10, fun: 8 } };
@@ -63,6 +68,36 @@ t('overspending is covered by the lowest priority first', () => {
   // a prorated week scales every category
   const short = Object.fromEntries(categoryLeft(split, 27.5, {}).map(r => [r.id, r]));
   assert.equal(short.food.budget, 12.5);
+});
+t('goal per week: every, by a date, percent', () => {
+  assert.equal(goalWeekly({ kind: 'every', amount: 100, freq: 'monthly' }, 225, mon), 23);   // 100 × 12 ÷ 52 = 23.08
+  assert.equal(goalWeekly({ kind: 'every', amount: 40, freq: 'biweekly' }, 225, mon), 20);
+  assert.equal(goalWeekly({ kind: 'percent', pct: 10 }, 225, mon), 23);                     // 22.5 → 23
+  assert.equal(goalWeekly({ kind: 'by', target: 500, date: '2026-10-04' }, 225, mon), 84);   // 6 weeks from Aug 24 → 83.3, rounded up
+});
+t('scaling a split keeps its shape and adds up', () => {
+  const order = ['food', 'fun', 'shopping', 'transport'];
+  const scaled = scaleSplit(order, { food: 89, fun: 57, shopping: 45, transport: 34 }, 200);
+  assert.equal(Object.values(scaled).reduce((t, v) => t + v, 0), 200);
+  assert.deepEqual(scaled, { food: 79, fun: 51, shopping: 40, transport: 30 });
+});
+t('goal fills on weeks you stay on track, going over eats into it', () => {
+  const state = {
+    setup: { startDate: '2026-10-19', goal: { kind: 'every', amount: 100, freq: 'monthly', since: '2026-10-19' } },
+    budgetHistory: [{ from: '2026-10-19', weekly: 200, save: 25 }],
+    tx: [
+      { amount: 150, at: new Date(2026, 9, 20).toISOString() },   // week of Oct 19: under → +25
+      { amount: 210, at: new Date(2026, 9, 27).toISOString() },   // week of Oct 26: $10 over → +15
+      { amount: 260, at: new Date(2026, 10, 3).toISOString() }    // week of Nov 2: $60 over → +0
+    ]
+  };
+  const now = new Date(2026, 10, 10, 12);                        // Tue Nov 10, nothing spent yet this week
+  const g = goalProgress(state, now);
+  assert.deepEqual(g.weeks.map(w => w.saved), [25, 15, 0]);
+  assert.equal(g.total, 40);
+  assert.equal(g.pending, 25);
+  assert.equal(g.month, 25);                                     // November: Nov 2 week (0) + this week (25)
+  assert.equal(g.projected('2026-11-30'), 40 + 25 + 25 * 2);     // Nov 16 and Nov 23 weeks still to come
 });
 t('never negative', () => {
   const r = computeWeekly({ sources: [{ type: 'job', amount: 100, freq: 'monthly' }], bills: [{ type: 'rent', amount: 900 }], semesterEnd: end }, mon);

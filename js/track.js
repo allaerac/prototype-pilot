@@ -1,8 +1,8 @@
 // Pilot usage events. Each one is queued on the phone and sent in batches to the Supabase "events" table.
 // Nothing is queued before the student agrees in setup, or after they stop sharing.
-import { SUPABASE_URL, SUPABASE_ANON_KEY, APP_VERSION } from './config.js?v=5';
-import * as store from './store.js?v=5';
-import { TRACKING } from './content.js?v=5';
+import { SUPABASE_URL, SUPABASE_ANON_KEY, APP_VERSION } from './config.js?v=10';
+import * as store from './store.js?v=10';
+import { TRACKING } from './content.js?v=10';
 
 const QKEY = 'prototype.queue';
 const MAX_QUEUE = 2000;
@@ -28,6 +28,7 @@ export function track(name, props = {}) {
   queue.push({
     id: store.newId(),
     anon_id: s.anonId,
+    username: s.username || null,
     name,
     props,
     at: store.now().toISOString(),
@@ -56,6 +57,12 @@ function post(rows, keepalive) {
 }
 
 export function clear() { queue = []; persist(); }
+
+// Events this phone queued before the student picked a username get it too.
+export function tagQueue(username) {
+  queue.forEach(e => { if (!e.username) e.username = username; });
+  persist();
+}
 
 // When a group is switched off, events from it that are still waiting on the phone are dropped too.
 export function dropGroup(id) {

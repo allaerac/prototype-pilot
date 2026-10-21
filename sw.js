@@ -3,7 +3,7 @@
 const CACHE = 'prototype-v1';
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
-  'js/app.js', 'js/budget.js', 'js/content.js', 'js/config.js', 'js/store.js', 'js/track.js',
+  'js/app.js', 'js/account.js', 'js/budget.js', 'js/content.js', 'js/config.js', 'js/store.js', 'js/track.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'
 ];
 

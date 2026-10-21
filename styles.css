@@ -131,7 +131,9 @@ button { background: none; border: 0; cursor: pointer; padding: 0; }
 .icon-btn svg { width: 1.2em; height: 1.2em; }
 
 .grid2 { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: var(--gap); }
-.col { display: grid; gap: var(--gap); min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
+.col { display: flex; flex-direction: column; gap: var(--gap); min-height: 0; }
+.col > .card { flex: none; }
+.col > .fill { flex: 1; min-height: 0; }
 .fill { display: flex; flex-direction: column; }
 
 /* ---------- Tab bar (the one navigation hub) + log button ---------- */
@@ -187,7 +189,7 @@ button { background: none; border: 0; cursor: pointer; padding: 0; }
 .pace::before { content: ""; flex: none; width: .5em; height: .5em; border-radius: 50%; background: var(--good); }
 .pace.warm { background: color-mix(in srgb, var(--amber) 14%, transparent); color: color-mix(in srgb, var(--amber) 70%, var(--screen-ink)); }
 .pace.warm::before { background: var(--amber); }
-.cats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1em; }
+.cats { display: grid; grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); gap: 1em; }
 .cat { display: grid; justify-items: center; gap: .4em; text-align: center; }
 .cat-ring { position: relative; width: 5.2em; aspect-ratio: 1; }
 .cat-ring svg { width: 100%; height: 100%; display: block; }
@@ -406,6 +408,41 @@ textarea.field { resize: none; min-height: 5em; font: inherit; }
 .track-item .why { padding: .7em .9em; border-radius: .9em; background: var(--frost); }
 .track-item .why .s-mono { display: block; margin-bottom: .3em; color: color-mix(in srgb, var(--violet) 60%, var(--screen-ink)); }
 .switch:disabled { opacity: .4; }
+.breakdown .arrow { color: var(--screen-soft); font-weight: 400; margin: 0 .15em; }
+.breakdown b small { font-weight: 400; color: var(--screen-soft); font-size: .8em; margin-left: .3em; }
+.date-in.small { width: auto; font-size: 1em; padding: .45em .8em; border-radius: .9em; }
+
+/* stress slider: the track fills from mint (chill) to amber to blush (stressed) up to the thumb */
+.stress-range { -webkit-appearance: none; appearance: none; width: 100%; height: 1.6em; background: transparent; margin: .2em 0 0; }
+.stress-range::-webkit-slider-runnable-track { height: .55em; border-radius: 999px; background: linear-gradient(90deg, var(--mint), var(--amber) 55%, var(--blush)) 0 0 / var(--v) 100% no-repeat, rgba(238, 241, 247, .08); }
+.stress-range::-moz-range-track { height: .55em; border-radius: 999px; background: linear-gradient(90deg, var(--mint), var(--amber) 55%, var(--blush)) 0 0 / var(--v) 100% no-repeat, rgba(238, 241, 247, .08); }
+.stress-range::-webkit-slider-thumb { -webkit-appearance: none; width: 1.5em; height: 1.5em; margin-top: -.48em; border-radius: 50%; background: var(--screen-ink); border: 0; box-shadow: 0 2px 10px rgba(0, 0, 0, .35); }
+.stress-range::-moz-range-thumb { width: 1.5em; height: 1.5em; border-radius: 50%; background: var(--screen-ink); border: 0; }
+.stress-range:not(.set)::-webkit-slider-thumb { background: var(--screen-soft); }
+.stress-range:not(.set)::-moz-range-thumb { background: var(--screen-soft); }
+.stress-card .scale-ends { margin-top: .15em; }
+.stress-setup { display: grid; gap: .4em; }
+.stress-big { font-family: var(--display); font-size: 3.4em; font-weight: 300; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+.stress-card.mini { display: flex; align-items: center; gap: .7em; padding-top: .8em; padding-bottom: .8em; flex: none; }
+.stress-card.mini span { flex: 1; color: var(--screen-soft); font-size: .92em; }
+.stress-card.mini b { font-weight: 500; font-variant-numeric: tabular-nums; color: color-mix(in srgb, var(--mint) 60%, var(--screen-ink)); }
+.stress-card.mini b.high { color: color-mix(in srgb, var(--amber) 70%, var(--screen-ink)); }
+
+.goal-card { display: flex; align-items: center; gap: 1em; }
+.goal-card .cat-ring { flex: none; }
+.goal-text { display: grid; gap: .1em; min-width: 0; }
+.goal-text b { font-weight: 500; font-size: 1.05em; }
+.goal-text .s-soft { font-size: .82em; }
+.goal-cheer { font-size: .85em; font-weight: 400; color: color-mix(in srgb, var(--mint) 60%, var(--screen-ink)); }
+.goal-card.hit { border-color: color-mix(in srgb, var(--mint) 45%, transparent); }
+
+.stress-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: .5em; align-items: end; }
+.stress-week div { display: grid; gap: .3em; justify-items: center; }
+.stress-week i { width: 100%; height: 3.2em; border-radius: .5em; background: linear-gradient(0deg, color-mix(in srgb, var(--amber) 70%, var(--blush)) 0 var(--v), rgba(238, 241, 247, .06) var(--v)); }
+.stress-week i.none { background: rgba(238, 241, 247, .04); }
+.stress-week span { font-size: .72em; color: var(--screen-soft); }
+.money-in.user-in { width: 13em; }
+.user-in input { text-align: left; }
 .breakdown { display: grid; }
 .breakdown .s-mono { margin-bottom: .3em; }
 .breakdown .set-row { padding: .6em 0; font-variant-numeric: tabular-nums; }
@@ -444,9 +481,15 @@ textarea.field { resize: none; min-height: 5em; font: inherit; }
 @media (max-aspect-ratio: 1/1) {
   .app { font-size: min(4.1vw, 2vh); font-size: min(4.1vw, 2dvh); --edge: 1.2em; --gap: .8em; --bar: 3.5em; }
   .grid2 { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
-  .col { grid-template-rows: auto minmax(0, 1fr); }
   .stack { grid-template-rows: auto auto minmax(0, 1fr); }
   .card { padding: 1.1em 1.2em; border-radius: 1.3em; }
+  .stress-card.mini { padding-top: .6em; padding-bottom: .6em; }
+  .stress-card:not(.mini) { padding-top: .8em; padding-bottom: .7em; }
+  .stress-card .card-head { margin-bottom: .2em; }
+  .stress-card .scale-ends { display: none; }
+  .goal-card { padding-top: .8em; padding-bottom: .8em; gap: .8em; }
+  .goal-card .cat-ring { width: 2.9em; }
+  .goal-text .s-mono, .goal-text .long { display: none; }
   .card-head { margin-bottom: .6em; }
   .vhead h3 { font-size: 1.6em; }
   .vhead-l { gap: .7em; }
@@ -458,7 +501,7 @@ textarea.field { resize: none; min-height: 5em; font: inherit; }
   .streak-card { display: none; }
   .hero { gap: .7em; }
   .hero-top { display: none; }
-  .big-ring { width: min(12.5em, 100%); }
+  .big-ring { width: min(11em, 100%); }
   .ring-num { font-size: 3.4em; }
   .pace { font-size: .82em; }
   .cats { gap: .4em; }

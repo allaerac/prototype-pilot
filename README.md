@@ -6,12 +6,13 @@ A phone web app (PWA) for the ESP201 student pilot. It's plain HTML, CSS and Jav
 |---|---|
 | `index.html`, `styles.css` | The page and the design system (same look as the class demo) |
 | `js/app.js` | Screens: setup, Home, Deals, Recap, sheets, alerts |
-| `js/budget.js` | The weekly-number formula, weeks, streaks (tested) |
-| `js/content.js` | **Team-editable:** semester end date, deals, tips, consent wording |
+| `js/budget.js` | The weekly-number formula, category split, savings goal, weeks, streaks (tested) |
+| `js/content.js` | **Team-editable:** semester end date, deals, tips, consent wording, what-we-collect reasons |
 | `js/store.js` | The student's data, saved on their phone |
+| `js/account.js` | Username login (no password) and the backup that brings a student's data back on a new phone |
 | `js/track.js` | Pilot usage events, queued on the phone and sent to Supabase |
 | `js/config.js` | Supabase URL + public (anon) key |
-| `supabase/schema.sql` | The `events` table. Run once in Supabase |
+| `supabase/schema.sql` | The `events` table, usernames and backups, and the `student_events` view. Already applied to the project |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Install to Home Screen + offline |
 
 ## Run it locally
@@ -26,7 +27,7 @@ node app/test/budget.test.mjs
 ```
 
 ## Before students get the link
-1. **Supabase:** open the SQL Editor, run `supabase/schema.sql`, then paste the project's **anon public** key into `js/config.js`. Until then, events wait on each phone and send once the key is set.
+1. **Supabase:** done. `supabase/schema.sql` is applied and the anon key is in `js/config.js`. Delete the test rows before launch (test usernames start with `zz_`).
 2. **Semester end:** confirm Miami's last day of finals and update `SEMESTER_END_DEFAULT` in `js/content.js` (currently Dec 11, 2026).
 3. **Deals:** call or visit each venue in `DEALS` (`js/content.js`), delete anything that's wrong, and fill in `checked` with the date. The research and sources are in `pilot/deals-research.md`.
 4. **Copy review:** the team reads the consent text (`CONSENT`) and tips (`TIPS`) for tone and legal framing. Ask the instructor whether collecting this data needs approval.
@@ -37,22 +38,29 @@ node app/test/budget.test.mjs
 2. In the repo, go to Settings → Pages → Deploy from branch → `main` / root.
 3. Share the `https://<user>.github.io/<repo>/` link.
 
-**Every time you deploy a change:** bump the `?v=` number in `index.html` (two places) and in the `import` lines of `js/app.js` and `js/track.js`, so phones don't mix old and new files.
+**Every time you deploy a change:** bump the `?v=` number in `index.html` (two places) and in the `import` lines of `js/app.js`, `js/track.js` and `js/account.js`, so phones don't mix old and new files.
+
+## Usernames and backups
+Students pick a username in setup (no password). It's on every event, so a student who clears their browser or switches phones stays one person in the data: they tap **Already have a username? Log in** on the first screen and their setup, purchases, goal and stress answers come back. The phone backs up to `pilot_users` a few seconds after each change, without purchase notes. Students can turn the backup off in Settings. With no password, anyone who knows a username can log in as that person, so tell students to use a nickname, not their real name.
 
 ## What gets collected
-Every event has a random ID per phone (`anon_id`), a name, small `props`, and a time. There are no names, emails or bank data.
+Every event has a random ID per phone (`anon_id`), the student's `username` once they've picked one, a name, small `props`, and a time. There are no real names, emails or bank data. To count people, use the `student_events` view: its `student` column is the username, filled in for the few events a phone sent before the student picked it.
 
 | Event | When | Props |
 |---|---|---|
 | `consent_given` | Student agrees in setup | version |
-| `setup_start`, `setup_step`, `setup_complete` | Setup | step (`onhand`, `income`, `bills`, `end`, `stress`, `result`, `split`, `ready`); income types and frequencies (a type can repeat), bill types and frequencies, whether they have money now (true/false, never the amount), category priority order and split, whether they changed the suggested split, cushion, suggested vs final number, seconds taken, baseline stress |
-| `setup_redo_start`, `setup_redo_complete` | Settings → Redo setup or Change split | same as `setup_complete`, without baseline stress |
+| `setup_start`, `setup_step`, `setup_complete` | Setup | step (`username`, `onhand`, `income`, `bills`, `end`, `stress`, `result`, `goal`, `split`, `ready`); income types and frequencies (a type can repeat), bill types and frequencies, whether they have money now (true/false, never the amount), category priority order, any categories they added, the split per week, whether they changed the suggested split, savings goal (name, kind, dollars a week), cushion, suggested vs final number, seconds taken, baseline stress (0–100) |
+| `setup_redo_start`, `setup_redo_complete` | Settings → Redo setup, Change split or Change goal | same as `setup_complete`, without baseline stress |
+| `goal_set`, `goal_removed` | A goal is set or changed, or taken away | name, kind (`every`, `by`, `percent`), freq, pct, per_week |
+| `login` | Logged in with a username on this phone | whether a backup came back |
+| `backup_pref` | Settings → Back up to your username | on |
+| `stress_daily` | Home's money stress slider, once a day (can be changed) | day, pct (0–100), first_today |
 | `app_open` | Every open or return to the app | standalone (installed?), days since start |
 | `screen_view` | Tab change | screen |
 | `log_open`, `tx_add`, `tx_delete` | Logging | amount, category, today/yesterday, % of week used |
 | `alert_shown` | 75% / 100% alert | threshold |
-| `week_closed` | Once per finished week | budget, spent, under, purchases logged |
-| `stress_checkin` | Recap 1–5 | week, score |
+| `week_closed` | Once per finished week | budget, spent, under, purchases logged, goal_saved (what landed in the goal) |
+| `stress_checkin` | Old 1–5 recap question (replaced by `stress_daily`) | week, score |
 | `deal_open`, `deal_source`, `deals_21_toggle` | Deals | deal id |
 | `survey_response` | Day 14 and day 28 check-ins | satisfaction, keep using, would pay, comments |
 | `feedback` | Settings → Send feedback | text |
@@ -64,50 +72,64 @@ Settings → **What we collect** (also linked from the consent card in setup) li
 
 | Group | Events |
 |---|---|
-| `setup` Your setup answers | `setup_start`, `setup_step`, `setup_complete`, `setup_redo_start`, `setup_redo_complete` |
+| `setup` Your setup answers | `setup_start`, `setup_step`, `setup_complete`, `setup_redo_start`, `setup_redo_complete`, `goal_set`, `goal_removed` |
 | `purchases` Purchases you log | `log_open`, `tx_add`, `tx_delete` |
 | `weeks` How your weeks go | `week_closed`, `alert_shown` |
-| `stress` Money stress check-ins | `stress_checkin`, plus `baseline_stress` inside `setup_complete` |
+| `stress` Money stress check-ins | `stress_daily`, `stress_checkin`, plus `baseline_stress` inside `setup_complete` |
 | `usage` When and how you use the app | `app_open`, `screen_view`, `recap_view`, `survey_open`, `install_prompt`, `installed` |
 | `deals` Deals you check out | `deal_open`, `deal_source`, `deals_21_toggle` |
 
-Always sent while sharing is on: `consent_given`, `sharing_on`/`sharing_off`, `share_pref`, `reset`, and the surveys and feedback a student chooses to send. Switching a group off also drops that group's events still waiting on the phone. A student who turns a group off won't show up in the metrics below that use it, so check `share_pref` before reading low numbers as low usage.
+Always sent while sharing is on: `consent_given`, `sharing_on`/`sharing_off`, `share_pref`, `backup_pref`, `login`, `reset`, and the surveys and feedback a student chooses to send. Switching a group off also drops that group's events still waiting on the phone. A student who turns a group off won't show up in the metrics below that use it, so check `share_pref` before reading low numbers as low usage.
 
 ## Reading the results (Supabase SQL Editor)
 ```sql
+-- Every query counts people by `student` (their username), so a student who switched phones counts once.
+
 -- Setup completion (PRD target ≥ 70%)
-select count(distinct anon_id) filter (where name = 'consent_given') as agreed,
-       count(distinct anon_id) filter (where name = 'setup_complete') as finished
-from events;
+select count(distinct student) filter (where name = 'consent_given') as agreed,
+       count(distinct student) filter (where name = 'setup_complete') as finished
+from student_events;
 
 -- Week-4 retention (target ≥ 50%): opened the app 21–28 days after setup
-with s as (select anon_id, min(at) t0 from events where name = 'setup_complete' group by anon_id)
+with s as (select student, min(at) t0 from student_events where name = 'setup_complete' group by student)
 select count(*) as students,
        count(*) filter (where exists (
-         select 1 from events e where e.anon_id = s.anon_id and e.name = 'app_open'
+         select 1 from student_events e where e.student = s.student and e.name = 'app_open'
            and e.at >= s.t0 + interval '21 days' and e.at < s.t0 + interval '28 days')) as opened_week_4
 from s;
 
--- Weeks under budget (target ≥ 60%), counting only weeks with something logged
-select count(*) filter (where (props->>'under')::boolean) as under, count(*) as weeks
-from events where name = 'week_closed' and (props->>'logged')::int > 0;
+-- Weeks under budget (target ≥ 60%), counting only weeks with something logged.
+-- One row per student and week, in case a backup brought a week back on a second phone.
+select count(*) filter (where under) as under, count(*) as weeks
+from (select distinct on (student, props->>'week') (props->>'under')::boolean as under
+      from student_events where name = 'week_closed' and (props->>'logged')::int > 0
+      order by student, props->>'week', at) w;
 
--- Money stress: baseline vs latest check-in (target: down ≥ 1 point)
-with b as (select anon_id, (props->>'baseline_stress')::int s0 from events where name = 'setup_complete'),
-     l as (select distinct on (anon_id) anon_id, (props->>'score')::int s1
-           from events where name = 'stress_checkin' order by anon_id, at desc)
-select round(avg(s0), 2) baseline, round(avg(s1), 2) latest, round(avg(s1 - s0), 2) change
-from b join l using (anon_id);
+-- Money stress (0–100 slider): setup vs the last 7 days of daily answers.
+-- The PRD's target was "down ≥ 1 point" on a 1–5 scale, which is about 25 points here.
+with b as (select distinct on (student) student, (props->>'baseline_stress')::int s0
+           from student_events where name = 'setup_complete' order by student, at),
+     l as (select student, avg((props->>'pct')::int) s1 from student_events
+           where name = 'stress_daily' and at > now() - interval '7 days' group by student)
+select round(avg(s0)) baseline, round(avg(s1)) last_7_days, round(avg(s1 - s0)) change, count(*) students
+from b join l using (student);
+
+-- Savings goals: who has one, what for, and how much landed in it
+select g.student, g.props->>'name' as goal, g.props->>'kind' as kind, (g.props->>'per_week')::int as per_week,
+       coalesce(sum((w.props->>'goal_saved')::numeric), 0) as saved_so_far
+from (select distinct on (student) * from student_events where name = 'goal_set' order by student, at desc) g
+left join student_events w on w.student = g.student and w.name = 'week_closed' and w.at > g.at
+group by 1, 2, 3, 4;
 
 -- Deals use per week (target ≥ 30% of active students)
 select date_trunc('week', at) as week,
-       count(distinct anon_id) filter (where name = 'screen_view' and props->>'screen' = 'deals') as opened_deals,
-       count(distinct anon_id) as active
-from events group by 1 order by 1;
+       count(distinct student) filter (where name = 'screen_view' and props->>'screen' = 'deals') as opened_deals,
+       count(distinct student) as active
+from student_events group by 1 order by 1;
 
 -- Satisfaction and willingness to pay
 select props->>'survey' as survey, round(avg((props->>'satisfaction')::int), 2) as satisfaction, count(*)
-from events where name = 'survey_response' group by 1;
-select props->>'pay' as pay, count(*) from events
+from student_events where name = 'survey_response' group by 1;
+select props->>'pay' as pay, count(*) from student_events
 where name = 'survey_response' and props->>'survey' = 'final' group by 1;
 ```

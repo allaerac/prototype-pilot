@@ -74,15 +74,50 @@ export function splitFor(budgetHistory, wk) {
   return v && v.cats && v.order ? v : null;
 }
 
-// Suggested split: the higher a category is in the student's order, the bigger its share.
-// Whole dollars that add up to the weekly number exactly (the rounding difference goes to the top category).
-export const SPLIT_WEIGHTS = [0.4, 0.25, 0.2, 0.15];
+// Suggested split: the higher a category is in the student's order, the bigger its share (weight 1 ÷ (rank + 1.5),
+// so four categories get about 42%, 25%, 18% and 14%). Whole dollars that add up to the weekly number exactly;
+// the rounding difference goes to the top category.
 export function suggestSplit(order, weekly) {
+  const weights = order.map((_, i) => 1 / (i + 1.5));
+  const sum = weights.reduce((t, w) => t + w, 0);
   const cats = {};
   let total = 0;
-  order.forEach((id, i) => { cats[id] = Math.round(weekly * (SPLIT_WEIGHTS[i] || 0)); total += cats[id]; });
+  order.forEach((id, i) => { cats[id] = Math.round(weekly * weights[i] / sum); total += cats[id]; });
   if (order.length) cats[order[0]] += weekly - total;
   return cats;
+}
+
+// Resize a split to a new weekly total while keeping its shape: every category moves by the same share.
+// Whole dollars that add up exactly; the rounding difference goes to the top category.
+export function scaleSplit(order, cats, total) {
+  const from = order.reduce((t, id) => t + (Number(cats[id]) || 0), 0);
+  if (from <= 0) return suggestSplit(order, total);
+  const out = {};
+  let sum = 0;
+  order.forEach(id => { out[id] = Math.round((Number(cats[id]) || 0) * total / from); sum += out[id]; });
+  if (order.length) out[order[0]] += total - sum;
+  return out;
+}
+
+/*
+  Savings goal: dollars per week set aside before the student spends anything.
+  goal.kind: 'every' (amount each week / 2 weeks / month), 'by' (target by a date), 'percent' (pct of the
+  weekly money before saving). 'by' spreads the target over the weeks from today to the date, rounded up.
+*/
+// Just what the goal is (no bookkeeping like perWeek or since), to tell whether the student changed it.
+export function goalFields(g) {
+  if (g.kind === 'every') return { name: g.name, kind: g.kind, amount: g.amount, freq: g.freq };
+  if (g.kind === 'by') return { name: g.name, kind: g.kind, target: g.target, date: g.date };
+  return { name: g.name, kind: g.kind, pct: g.pct };
+}
+export function goalWeekly(goal, grossWeekly, today) {
+  if (!goal) return 0;
+  if (goal.kind === 'percent') return Math.round(grossWeekly * (Number(goal.pct) || 0) / 100);
+  if (goal.kind === 'by') {
+    const weeks = Math.max(1, (daysBetween(today, parseKey(goal.date)) + 1) / 7);
+    return Math.ceil((Number(goal.target) || 0) / weeks);
+  }
+  return Math.round((Number(goal.amount) || 0) * (FREQ_PER_WEEK[goal.freq] || 0));
 }
 
 /*
@@ -111,16 +146,43 @@ export function categoryLeft(split, budget, spentByCat) {
   return rows;
 }
 
-// The week setup happened in is usually partial, so its budget is prorated by the days that were left in it.
-export function budgetForWeek(state, wk) {
-  const full = weeklyFor(state.budgetHistory || [], wk);
+// The week setup happened in is usually partial, so its budget (and savings) are prorated by the days left in it.
+function weekShare(state, wk) {
   const startKey = state.setup && state.setup.startDate;
-  if (!startKey) return full;
-  if (wk === weekKey(parseKey(startKey))) {
-    const daysIn = 7 - ((parseKey(startKey).getDay() + 6) % 7);
-    return Math.round(full * daysIn / 7);
-  }
-  return full;
+  if (startKey && wk === weekKey(parseKey(startKey))) return (7 - ((parseKey(startKey).getDay() + 6) % 7)) / 7;
+  return 1;
+}
+export function budgetForWeek(state, wk) {
+  return Math.round(weeklyFor(state.budgetHistory || [], wk) * weekShare(state, wk));
+}
+// Dollars set aside for the goal that week (budgetHistory entries carry `save` once a goal is set).
+export function saveForWeek(state, wk) {
+  let save = 0;
+  for (const b of state.budgetHistory || []) if (b.from <= wk) save = Number(b.save) || 0;
+  return Math.round(save * weekShare(state, wk));
+}
+
+/*
+  How the savings goal is doing. Each finished week since the goal was set adds that week's savings if the
+  student stayed within their number; going over eats into it first. The current week counts what's still
+  on track so far. Month = weeks whose Monday is in the current month.
+  Returns {total, pending, month, perWeek, projected(untilKey)}.
+*/
+export function goalProgress(state, now) {
+  const goal = state.setup && state.setup.goal;
+  if (!goal) return null;
+  const since = goal.since || '';
+  const gotFor = (wk, spent) => { const save = saveForWeek(state, wk); return Math.max(0, save - Math.max(0, spent - budgetForWeek(state, wk))); };
+  const weeks = closedWeeks(state, now).filter(w => w.wk >= since).map(w => ({ wk: w.wk, saved: gotFor(w.wk, w.spent) }));
+  const cur = weekKey(now);
+  const pending = cur >= since ? gotFor(cur, spentInWeek(state.tx || [], cur)) : 0;
+  const total = weeks.reduce((t, w) => t + w.saved, 0);
+  const ym = cur.slice(0, 7);
+  const month = weeks.filter(w => w.wk.slice(0, 7) === ym).reduce((t, w) => t + w.saved, 0) + pending;
+  const perWeek = saveForWeek({ ...state, setup: { ...state.setup, startDate: null } }, cur);
+  // if they keep it up: what's saved, plus this week, plus every full week until the date
+  const projected = untilKey => total + pending + perWeek * Math.max(0, Math.floor((daysBetween(now, parseKey(untilKey)) - daysLeftInWeek(now) + 1) / 7));
+  return { weeks, total, pending, month, perWeek, projected };
 }
 
 export function spentInWeek(tx, wk) {

@@ -36,10 +36,10 @@ export const BILLS = [
 ];
 
 export const CONSENT = {
-  version: 2,
+  version: 3,
   title: 'Help us test this app',
   points: [
-    'We collect how you use the app (screens opened, purchases logged, survey answers), tied to a random ID, not your name.',
+    'We collect how you use the app (screens opened, purchases logged, survey answers), tied to a username you pick, not your real name.',
     'We never connect to your bank, and nothing you log is shared outside the ESP201 team.',
     'You can turn off any part of it, or all of it, in Settings, and the app keeps working on your phone.'
   ]
@@ -51,9 +51,9 @@ export const CONSENT = {
 export const TRACKING = [
   {
     id: 'setup', name: 'Your setup answers',
-    what: 'The kinds of income and bills you pick (not how much), your weekly number and how you split it up.',
+    what: "The kinds of income and bills you pick (not how much), your weekly number, how you split it up, and what you're saving for.",
     why: 'We want to see if setup actually makes sense and if the number we give you feels right, or if people end up changing it. Helps us make setup quicker and the math better.',
-    events: ['setup_start', 'setup_step', 'setup_complete', 'setup_redo_start', 'setup_redo_complete']
+    events: ['setup_start', 'setup_step', 'setup_complete', 'setup_redo_start', 'setup_redo_complete', 'goal_set', 'goal_removed']
   },
   {
     id: 'purchases', name: 'Purchases you log',
@@ -69,9 +69,9 @@ export const TRACKING = [
   },
   {
     id: 'stress', name: 'Money stress check-ins',
-    what: 'Your 1–5 answer from setup and from each weekly recap.',
+    what: 'Where you put the stress slider in setup and each day you answer it on Home.',
     why: "We want money to feel less stressful, not more. This lets us see if that's actually happening over the 4 weeks.",
-    events: ['stress_checkin']
+    events: ['stress_daily', 'stress_checkin']
   },
   {
     id: 'usage', name: 'When and how you use the app',
