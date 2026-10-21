@@ -1,11 +1,11 @@
 // Prototype pilot app: setup, Home (ring + quick-log), Deals, Recap, sheets and limit alerts.
 // Rendering is plain template strings. State lives in store.js; pilot events go through track.js.
-import * as store from './store.js?v=10';
-import { track, flush, pending, groupOn, dropGroup, tagQueue } from './track.js?v=10';
-import * as account from './account.js?v=10';
-import * as B from './budget.js?v=10';
-import { APP_VERSION } from './config.js?v=10';
-import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING, DEALS, TIPS } from './content.js?v=10';
+import * as store from './store.js?v=11';
+import { track, flush, pending, groupOn, dropGroup, tagQueue } from './track.js?v=11';
+import * as account from './account.js?v=11';
+import * as B from './budget.js?v=11';
+import { APP_VERSION } from './config.js?v=11';
+import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING, DEALS, TIPS } from './content.js?v=11';
 
 const S = store.get;
 const app = document.getElementById('app');
@@ -811,7 +811,7 @@ function stressCardHTML() {
     </div>`;
   }
   return `<div class="card stress-card">
-    <div class="card-head"><b>Money stress today</b><span class="s-mono">${answered ? v + '%' : 'Chill → stressed'}</span></div>
+    <div class="card-head"><b>Money stress today</b><span class="row"><span class="s-mono">${answered ? v + '%' : 'Chill → stressed'}</span><button class="chip sel stress-save" data-stress-save>Save</button></span></div>
     <input type="range" class="stress-range${answered ? ' set' : ''}" min="0" max="100" step="1" value="${answered ? v : 50}" data-stressday aria-label="How stressed about money are you today, 0 to 100" style="--v:${answered ? v : 50}%">
     <div class="scale-ends"><span>Chill</span><span>Super stressed</span></div>
   </div>`;
@@ -1246,6 +1246,7 @@ app.addEventListener('click', e => {
   }
   if (d.catadj) { const [id, n] = d.catadj.split(':'); draft.cats[id] = Math.max(0, (Number(draft.cats[id]) || 0) + Number(n)); draft.splitEdited = true; renderSetup(false); return; }
   if ('stressEdit' in d) { stressEdit = true; renderApp(false); return; }
+  if ('stressSave' in d) { saveStress(); return; }
   if (d.goalpick) { draft.goal.name = d.goalpick; draft.noGoal = false; draft.goalTouched = true; renderSetup(false); return; }
   if (d.goalkind) { draft.goal.kind = d.goalkind; draft.noGoal = false; draft.goalTouched = true; renderSetup(false); return; }
   if (d.goalfreq) { draft.goal.freq = d.goalfreq; draft.goalTouched = true; renderSetup(false); return; }
@@ -1355,10 +1356,10 @@ app.addEventListener('click', e => {
   }
 });
 
-// The daily stress slider saves when they let go, then Home redraws (with the reminder if it's high).
-app.addEventListener('change', e => {
-  const t = e.target;
-  if (!('stressday' in t.dataset)) return;
+// The daily stress slider saves when they tap Save, then Home redraws (with the reminder if it's high).
+function saveStress() {
+  const t = viewsEl.querySelector('[data-stressday]');
+  if (!t) return;
   const v = Number(t.value), day = B.dateKey(store.now());
   const first = S().stressDaily == null || S().stressDaily[day] == null;
   store.update(st => { st.stressDaily = { ...(st.stressDaily || {}), [day]: v }; });
@@ -1366,7 +1367,7 @@ app.addEventListener('change', e => {
   stressEdit = false;
   renderApp(false);
   if (v >= 60) showToast('Take a breath', easeMessage());
-});
+}
 
 app.addEventListener('input', e => {
   const t = e.target;

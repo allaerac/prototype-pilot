@@ -421,6 +421,8 @@ textarea.field { resize: none; min-height: 5em; font: inherit; }
 .stress-range:not(.set)::-webkit-slider-thumb { background: var(--screen-soft); }
 .stress-range:not(.set)::-moz-range-thumb { background: var(--screen-soft); }
 .stress-card .scale-ends { margin-top: .15em; }
+.stress-card .card-head .row { gap: .7em; }
+.stress-save { font-size: .82em; padding: .35em .95em; }
 .stress-setup { display: grid; gap: .4em; }
 .stress-big { font-family: var(--display); font-size: 3.4em; font-weight: 300; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
 .stress-card.mini { display: flex; align-items: center; gap: .7em; padding-top: .8em; padding-bottom: .8em; flex: none; }
