@@ -27,7 +27,7 @@ node app/test/budget.test.mjs
 ```
 
 ## Before students get the link
-1. **Supabase:** done. `supabase/schema.sql` is applied and the anon key is in `js/config.js`. Delete the test rows before launch (test usernames start with `zz_`).
+1. **Supabase:** done. `supabase/schema.sql` is applied and the anon key is in `js/config.js`. Delete the test rows before launch (test usernames start with `zz_` or `test.`). Free projects **pause after about 7 days with no activity**: the app then can't sign anyone up. Restore it from the Supabase dashboard if that happens.
 2. **Semester end:** confirm Miami's last day of finals and update `SEMESTER_END_DEFAULT` in `js/content.js` (currently Dec 11, 2026).
 3. **Deals:** call or visit each venue in `DEALS` (`js/content.js`), delete anything that's wrong, and fill in `checked` with the date. The research and sources are in `pilot/deals-research.md`.
 4. **Copy review:** the team reads the consent text (`CONSENT`) and Recap's quotes (`QUOTES`, stand-ins for money tips for now) for tone and legal framing. Ask the instructor whether collecting this data needs approval.
@@ -41,7 +41,11 @@ node app/test/budget.test.mjs
 **Every time you deploy a change:** bump the `?v=` number in `index.html` (two places) and in the `import` lines of `js/app.js`, `js/track.js` and `js/account.js`, so phones don't mix old and new files.
 
 ## Usernames and backups
-Students pick a username in setup (no password). It's on every event, so a student who clears their browser or switches phones stays one person in the data: they tap **Already have a username? Log in** on the first screen and their setup, purchases, goal and stress answers come back. The phone backs up to `pilot_users` a few seconds after each change, without purchase notes. Students can turn the backup off in Settings. With no password, anyone who knows a username can log in as that person, so tell students to use a nickname, not their real name.
+In setup, students type their **first name, last name and any 2 numbers**, and the username is made from them: `austin.allaer27` (letters only, accents dropped). The server rejects a username someone already has, so two people with the same name just pick different numbers. There's no password.
+
+The username is on every event, so a student who clears their browser or switches phones stays one person in the data: they tap **Already signed up? Log in** on the first screen, type the same name and numbers, and their setup, purchases, goal and stress answers come back. The phone backs up to `pilot_users` a few seconds after each change, without purchase notes. Students can turn the backup off in Settings.
+
+**Privacy:** without a password, anyone who knows a classmate's name and 2 numbers (only 100 combinations) can log in as them and see their budget. Tell students to pick numbers nobody would guess.
 
 ## What gets collected
 Every event has a random ID per phone (`anon_id`), the student's `username` once they've picked one, a name, small `props`, and a time. There are no real names, emails or bank data. To count people, use the `student_events` view: its `student` column is the username, filled in for the few events a phone sent before the student picked it.
@@ -50,7 +54,7 @@ Every event has a random ID per phone (`anon_id`), the student's `username` once
 |---|---|---|
 | `consent_given` | Student agrees in setup | version |
 | `setup_start`, `setup_step`, `setup_complete` | Setup | step (`username`, `onhand`, `income`, `bills`, `end`, `stress`, `result`, `goal`, `split`, `ready`); income types and frequencies (a type can repeat), bill types and frequencies, whether they have money now (true/false, never the amount), category priority order, any categories they added, the split per week, whether they changed the suggested split, savings goal (name, kind, dollars a week at our pick and at the level they chose), `pace` (`conservative`, `middle`, `aggressive` or `custom` from the slider), cushion, suggested vs final number, seconds taken, baseline stress (0–100) |
-| `setup_redo_start`, `setup_redo_complete` | Settings → Redo setup, Change split or Change goal | same as `setup_complete`, without baseline stress |
+| `setup_redo_start`, `setup_redo_complete` | Settings → Redo setup, Money coming in, Change split or Change goal | same as `setup_complete`, without baseline stress, plus `edit` (`income`, `split`, `goal`, or null for a full redo) |
 | `goal_set`, `goal_removed` | A goal is set or changed, or taken away | name, kind (`every`, `by`, `percent`), freq, pct, per_week |
 | `login` | Logged in with a username on this phone | whether a backup came back |
 | `backup_pref` | Settings → Back up to your username | on |
@@ -81,6 +85,18 @@ Settings → **What we collect** (also linked from the consent card in setup) li
 | `deals` Deals you check out | `deal_open`, `deal_source`, `deals_21_toggle` |
 
 Always sent while sharing is on: `consent_given`, `sharing_on`/`sharing_off`, `share_pref`, `backup_pref`, `login`, `reset`, and the surveys and feedback a student chooses to send. Switching a group off also drops that group's events still waiting on the phone. A student who turns a group off won't show up in the metrics below that use it, so check `share_pref` before reading low numbers as low usage.
+
+## Logins: who opens the app and when
+Four views in Supabase (Table Editor, or `select * from …` in the SQL Editor). Times are Oxford time. Every open counts, including switching back to the app; a **visit** is an open at least 30 minutes after that student's previous one.
+
+| View | One row per | Use it for |
+|---|---|---|
+| `metric_daily_active` | Day | Students who opened the app that day, visits, raw opens. The daily-active chart for the pitch |
+| `metric_open_times` | Weekday × hour | When students open it (visits and students). A heat map |
+| `metric_students` | Student | First seen, setup finished, last open, opens, days active, purchases logged. Spot who stopped using it |
+| `metric_opens` | Open | Every open with its time and whether it came from the Home Screen app |
+
+To chart one in Google Sheets: run `select * from metric_daily_active` in the SQL Editor, click **Download CSV**, then import it. Students who switched off "When and how you use the app" in Settings don't send opens.
 
 ## Reading the results (Supabase SQL Editor)
 ```sql

@@ -403,7 +403,7 @@ textarea.field { resize: none; min-height: 5em; font: inherit; }
 .setup-body h3 { font-family: var(--display); font-weight: 500; font-size: 3em; line-height: 1.02; letter-spacing: -.035em; text-wrap: balance; }
 .setup-body .sub { color: var(--screen-soft); font-size: 1.05em; margin-top: -.6em; }
 .setup-foot { width: min(34em, 100%); display: grid; gap: .3em; flex: none; }
-.back { display: inline-flex; align-items: center; gap: .4em; color: var(--screen-soft); font-size: max(.95em, 11px); }
+.back { display: inline-flex; align-items: center; gap: .4em; white-space: nowrap; flex: none; color: var(--screen-soft); font-size: max(.95em, 11px); }
 .points { list-style: none; margin: 0; padding: 0; display: grid; gap: .9em; }
 .points li { display: grid; grid-template-columns: auto 1fr; gap: .8em; align-items: start; color: var(--screen-soft); }
 .points li::before { content: ""; width: .55em; height: .55em; margin-top: .45em; border-radius: 50%; background: var(--mint); }

@@ -1,11 +1,11 @@
 // Prototype pilot app: setup, Home (ring + quick-log), Deals, Recap, sheets and limit alerts.
 // Rendering is plain template strings. State lives in store.js; pilot events go through track.js.
-import * as store from './store.js?v=40';
-import { track, flush, groupOn, dropGroup, tagQueue } from './track.js?v=40';
-import * as account from './account.js?v=40';
-import * as B from './budget.js?v=40';
-import { APP_VERSION } from './config.js?v=40';
-import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING, DEALS, QUOTES } from './content.js?v=40';
+import * as store from './store.js?v=41';
+import { track, flush, groupOn, dropGroup, tagQueue } from './track.js?v=41';
+import * as account from './account.js?v=41';
+import * as B from './budget.js?v=41';
+import { APP_VERSION } from './config.js?v=41';
+import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING, DEALS, QUOTES } from './content.js?v=41';
 
 const S = store.get;
 const app = document.getElementById('app');
@@ -206,7 +206,8 @@ const FIRST_STEPS = ['welcome', 'username', 'onhand', 'income', 'bills', 'end', 
 const REDO_STEPS = ['onhand', 'income', 'bills', 'end', 'goal', 'result', 'split'];
 const GOAL_IDEAS = ['Investing', 'Emergency fund', 'Spring break', 'Concert tickets', 'New laptop'];
 // login: "Already have a username?" from the welcome screen. claim: someone set up before usernames existed.
-const steps = () => (draft.login ? ['welcome', 'login'] : draft.claim ? ['username'] : draft.redo ? REDO_STEPS : FIRST_STEPS);
+// incomeOnly: Settings → Money coming in, just the incomes and the new weekly number.
+const steps = () => (draft.login ? ['welcome', 'login'] : draft.claim ? ['username'] : draft.incomeOnly ? ['income', 'result'] : draft.redo ? REDO_STEPS : FIRST_STEPS);
 const BILL_FREQS = FREQS.filter(f => f.id !== 'once');
 
 // Incomes and bills are lists of rows, so a student can add two jobs or several bills of one type.
@@ -226,7 +227,8 @@ function newDraft(redo) {
     // savings goal being edited; noGoal after "Not right now"; goalTouched once any goal field changes
     goal: { name: '', kind: 'every', amount: '', freq: 'monthly', target: '', date: '', pct: '' }, noGoal: false, goalTouched: false,
     // username and login screens: what's typed, a message under it, and whether we're waiting on the server
-    username: '', userMsg: '', busy: false
+    // first and last name + 2 numbers make the username (account.makeUsername)
+    first: '', last: '', num: '', userMsg: '', busy: false
   };
   if (prev) {
     // setups saved before "money you have now" existed kept it as a one-time "savings" source
@@ -359,8 +361,8 @@ const splitLeft = () => draft.splitBase - draft.order.reduce((t, id) => t + (Num
 
 function stepValid(name) {
   const pos = v => Number(v) > 0;
-  if (name === 'username') return !!S().username || (!draft.busy && account.USERNAME_OK.test(draft.username));
-  if (name === 'login') return !draft.busy && account.USERNAME_OK.test(draft.username);
+  if (name === 'username') return !!S().username || (!draft.busy && account.USERNAME_OK.test(draftUsername()));
+  if (name === 'login') return !draft.busy && account.USERNAME_OK.test(draftUsername());
   if (name === 'split') { ensureSplit(); return splitLeft() === 0; }
   if (name === 'goal') return draft.noGoal || (!!draftGoal() && saveWeekly() < grossWeekly());
   if (name === 'income') return (draft.incomes.length > 0 || pos(draft.onHand)) && draft.incomes.every(x => pos(x.amount));
@@ -373,10 +375,11 @@ function stepValid(name) {
 function startSetup(redo, at, claim) {
   draft = newDraft(redo);
   draft.claim = !!claim;
+  draft.incomeOnly = at === 'income-only';
   step = at ? Math.max(0, steps().indexOf(at)) : 0;
   draft.at = at;
-  // "Change split" and "Change goal" keep the weekly money in force now instead of a fresh suggestion
-  if (at === 'split' || at === 'goal') {
+  // "Change split", "Change goal" and "Money coming in" keep how far the student moved off our pick
+  if (at === 'split' || at === 'goal' || draft.incomeOnly) {
     const cur = B.weeklyFor(S().budgetHistory || [], B.weekKey(store.now()));
     draft.adjust = cur - (grossWeekly() - saveWeekly());
   }
@@ -405,15 +408,15 @@ function setupBody(name) {
         <h3>You're @${esc(have)}</h3>
         <p class="sub">Log in with it on any phone to get your budget back. No password needed.</p>`;
     }
-    return `<span class="s-mono when">Pick a username</span>
-      <h3>What should we call you?</h3>
-      <p class="sub">If you switch phones or clear your browser, log in with this to get everything back. No password. Use a nickname, not your real name.</p>
+    return `<span class="s-mono when">Your username</span>
+      <h3>What's your name?</h3>
+      <p class="sub">Your first and last name plus any 2 numbers make your username. Remember it: it's how you get everything back on another phone.</p>
       ${usernameField()}`;
   }
   if (name === 'login') {
     return `<span class="s-mono when">Welcome back</span>
-      <h3>Log in with your username</h3>
-      <p class="sub">We'll bring back your budget and purchases from your last phone.</p>
+      <h3>Log in</h3>
+      <p class="sub">Your name and the 2 numbers you picked bring back your budget and purchases.</p>
       ${usernameField()}`;
   }
   if (name === 'onhand') {
@@ -531,7 +534,7 @@ function setupBody(name) {
           <div class="scale-ends"><span>${money(p.lo)}/wk · spend more</span><span>save more · ${money(p.hi)}/wk</span></div>
         </div>` : ''}
         ${r.pot > 0 ? `<button class="switch" role="switch" aria-checked="${draft.cushion}" data-cushion style="margin-top:1em">Keep a 10% cushion <i aria-hidden="true"></i></button>` : ''}
-        ${g ? '' : `<button class="text-btn add-goal" data-goto-goal>Saving for something? Add a goal &rarr;</button>`}
+        ${g || draft.incomeOnly ? '' : `<button class="text-btn add-goal" data-goto-goal>Saving for something? Add a goal &rarr;</button>`}
       </div>
       <div data-r-impact>${bits.impact}</div>
       <button class="link how-link" data-sheet="math">How we got this number &rarr;</button>
@@ -620,10 +623,16 @@ function refreshGoalPreview() {
   refreshSetupFoot();
 }
 
+// The username being typed: first.last + 2 numbers
+const draftUsername = () => account.makeUsername(draft.first, draft.last, draft.num);
+const usernamePreview = u => account.USERNAME_OK.test(u) ? `Your username: <b style="color:var(--screen-ink);font-weight:500">@${esc(u)}</b>` : 'Like a jersey number or your birthday.';
 function usernameField() {
-  return `<div class="money-row"><div class="row"><label for="uname">Username</label>
-      <span class="money-in user-in"><span>@</span><input id="uname" data-username autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="go" placeholder="nickname" value="${esc(draft.username)}"></span></div></div>
-    <p class="s-soft">3 to 20 letters, numbers, _ or .</p>`;
+  const f = (id, label, key, attrs) => `<div class="money-row"><div class="row"><label for="${id}">${label}</label>
+      <span class="money-in user-in"><input id="${id}" data-namef="${key}" autocomplete="off" autocorrect="off" spellcheck="false" value="${esc(draft[key])}" ${attrs}></span></div></div>`;
+  return `${f('fname', 'First name', 'first', 'autocapitalize="words" enterkeyhint="next" maxlength="30" placeholder="First"')}
+    ${f('lname', 'Last name', 'last', 'autocapitalize="words" enterkeyhint="next" maxlength="30" placeholder="Last"')}
+    ${f('unum', 'Any 2 numbers', 'num', 'inputmode="numeric" enterkeyhint="go" maxlength="2" placeholder="27"')}
+    <p class="s-soft" data-uname-preview>${usernamePreview(draftUsername())}</p>`;
 }
 
 // One card per income or bill: amount, how often, and a remove button. A second row of the same type is numbered ("Job 2").
@@ -647,10 +656,10 @@ function setupFoot(name) {
   if (name === 'welcome') {
     return `<button class="cta" data-agree>Agree and start</button>
       <button class="text-btn" data-noshare>Use it without sharing</button>
-      <button class="text-btn" data-login-open>Already have a username? Log in</button>`;
+      <button class="text-btn" data-login-open>Already signed up? Log in</button>`;
   }
-  const last = (name === 'split' && draft.redo) || name === 'login';
-  const label = name === 'result' ? 'Use this number' : name === 'split' ? (draft.redo ? 'Save my plan' : 'Use this split') : name === 'ready' ? 'Start my week'
+  const last = (name === 'split' && draft.redo) || name === 'login' || (name === 'result' && draft.incomeOnly);
+  const label = name === 'result' ? (draft.incomeOnly ? 'Save my new number' : 'Use this number') : name === 'split' ? (draft.redo ? 'Save my plan' : 'Use this split') : name === 'ready' ? 'Start my week'
     : name === 'login' ? (draft.busy ? 'Logging in…' : 'Log in') : name === 'username' && draft.busy ? 'Checking…' : 'Continue';
   let status = '';
   if (name === 'goal') {
@@ -697,6 +706,7 @@ async function nextStep() {
     if (draft.claim) { enterApp('home'); return; }
   }
   track('setup_step', { step: name, redo: !!draft.redo });
+  if (name === 'result' && draft.incomeOnly) { ensureSplit(); finishSetup(); return; }   // the split resizes to the new number
   if (name === 'split') { finishSetup(); if (draft.redo) return; }
   if (name === 'ready') { enterApp('home'); return; }
   step = Math.min(list.length - 1, step + 1);
@@ -707,28 +717,30 @@ const OFFLINE_MSG = "Couldn't connect. Check your internet and try again.";
 async function claimUsername() {
   draft.busy = true; draft.userMsg = ''; refreshSetupFoot();
   let ok = null;
-  try { ok = await account.signup(draft.username); } catch (e) { ok = null; }
+  const u = draftUsername();
+  try { ok = await account.signup(u); } catch (e) { ok = undefined; }
   draft.busy = false;
   if (ok) {
-    store.update(st => { st.username = draft.username; });
-    tagQueue(draft.username);
+    store.update(st => { st.username = u; });
+    tagQueue(u);
     return true;
   }
-  draft.userMsg = ok === false ? "That one's taken. Try another, or log in if it's yours." : OFFLINE_MSG;
+  draft.userMsg = ok === false ? `Someone already has @${u}. Pick 2 different numbers, or log in if it's you.`
+    : ok === null ? 'Use letters for your first and last name, plus 2 numbers.' : OFFLINE_MSG;
   refreshSetupFoot();
   return false;
 }
 async function logIn() {
   draft.busy = true; draft.userMsg = ''; refreshSetupFoot();
   let r;
-  try { r = await account.login(draft.username); } catch (e) { r = undefined; }
+  const u = draftUsername();
+  try { r = await account.login(u); } catch (e) { r = undefined; }
   draft.busy = false;
   if (!r) {
-    draft.userMsg = r === null ? "We couldn't find that username. Check the spelling." : OFFLINE_MSG;
+    draft.userMsg = r === null ? `We couldn't find @${u}. Check the spelling and your 2 numbers.` : OFFLINE_MSG;
     refreshSetupFoot();
     return;
   }
-  const u = draft.username;
   if (r.backup) store.restore(r.backup, u);
   else store.update(st => { st.username = u; });
   tagQueue(u);
@@ -794,6 +806,7 @@ function finishSetup() {
     adjust: draft.adjust,
     pace: g ? paceName(save) : null,
     weeks_left: Math.round(r.weeksLeft * 10) / 10,
+    edit: draft.incomeOnly ? 'income' : draft.at || null,
     seconds: Math.round((Date.now() - setupStarted) / 1000),
     baseline_stress: draft.redo ? undefined : draft.stress
   });
@@ -1220,6 +1233,14 @@ function amountText(a) {
   return Number(i || 0).toLocaleString('en-US') + (d !== undefined ? '.' + d : '');
 }
 
+// Settings' one-line list of incomes: "Job $250 every 2 weeks · Family $300 monthly"
+function incomeSummary(setup) {
+  const list = (setup.sources || []).filter(x => x.type !== 'savings');
+  if (!list.length) return 'Nothing yet: add a paycheck or money from family';
+  const freq = id => ((FREQS.find(f => f.id === id) || {}).name || '').toLowerCase();
+  return list.map(x => `${esc((SOURCES.find(t => t.id === x.type) || {}).name || 'Other')} ${money(x.amount)} ${freq(x.freq)}`).join(' &middot; ');
+}
+
 function renderSheet() {
   const s = S();
   let html = '';
@@ -1277,7 +1298,8 @@ function renderSheet() {
       <div class="sheet-body">
         <div class="set-list">
           <div class="set-row"><div><span>Weekly number</span><small>${money(B.weeklyFor(s.budgetHistory, wk))} a week until ${end}</small></div><button class="chip" data-redo>Redo setup</button></div>
-          ${s.setup ? `<div class="set-row"><div><span>Category split</span><small>${activeCats().map(c => esc(c.name)).join(' › ')}</small></div><button class="chip" data-resplit-open>Change</button></div>
+          ${s.setup ? `<div class="set-row"><div><span>Money coming in</span><small>${incomeSummary(s.setup)}</small></div><button class="chip" data-income-open>Change</button></div>
+          <div class="set-row"><div><span>Category split</span><small>${activeCats().map(c => esc(c.name)).join(' › ')}</small></div><button class="chip" data-resplit-open>Change</button></div>
           <div class="set-row"><div><span>Savings goal</span><small>${s.setup.goal ? `${esc(s.setup.goal.name)} · ${money(s.setup.goal.perWeek)} a week` : 'Nothing yet'}</small></div><button class="chip" data-goal-open>${s.setup.goal ? 'Change' : 'Set one'}</button></div>` : ''}
           <div class="set-row"><div><span>Send feedback</span><small>Questions, ideas, anything broken</small></div><button class="chip" data-sheet="feedback">Write</button></div>
           <div class="set-row"><div><span>Share usage with the team</span><button class="link" data-sheet="data">What we collect and why${s.consent && s.sharing ? ` (${TRACKING.filter(g => groupOn(s, g.id)).length} of ${TRACKING.length} on)` : ''} &rarr;</button></div><button class="switch" role="switch" aria-checked="${!!(s.consent && s.sharing)}" aria-label="Share usage with the team" data-sharing><i aria-hidden="true"></i></button></div>
@@ -1296,7 +1318,7 @@ function renderSheet() {
     const off = !s.sharing;
     html = `${sheetHead('What we collect')}
       <div class="sheet-body">
-        <p class="s-soft data-intro">Tied to your username, never your real name. Turn off anything and the app works the same. Tap one to see what it is and why.</p>
+        <p class="s-soft data-intro">Tied to your username (your name + 2 numbers) and seen only by the ESP201 team. Turn off anything and the app works the same. Tap one to see what it is and why.</p>
         ${off ? `<p class="note">Sharing is off, so none of this gets sent right now. Turn it back on in Settings.</p>` : ''}
         <div>${TRACKING.map(g => `<div class="track-item${openTrack === g.id ? ' open' : ''}">
           <div class="row"><button class="track-name" data-track-open="${g.id}" aria-expanded="${openTrack === g.id}">${esc(g.name)}<span aria-hidden="true">${openTrack === g.id ? '&minus;' : '+'}</span></button><button class="switch" role="switch" aria-label="Share ${esc(g.name.toLowerCase())}" aria-checked="${!off && groupOn(s, g.id)}" data-sharepref="${g.id}" ${off ? 'disabled' : ''}><i aria-hidden="true"></i></button></div>
@@ -1416,7 +1438,7 @@ app.addEventListener('click', e => {
   if ('noshare' in d) { store.update(st => { st.consent = null; st.sharing = false; }); nextStep(); return; }
   if ('next' in d) { nextStep(); return; }
   if ('back' in d) { step = Math.max(0, step - 1); if (draft.login && step === 0) { draft.login = false; draft.userMsg = ''; } renderSetup(true); return; }
-  if ('loginOpen' in d) { draft.login = true; draft.username = ''; draft.userMsg = ''; step = 1; renderSetup(true); return; }
+  if ('loginOpen' in d) { draft.login = true; draft.first = draft.last = draft.num = ''; draft.userMsg = ''; step = 1; renderSetup(true); return; }
   if ('cancel' in d) { enterApp('home'); return; }
   if (d.add) {
     const [kind, type] = d.add.split(':');
@@ -1496,6 +1518,7 @@ app.addEventListener('click', e => {
 
   // settings
   if ('redo' in d) { closeSheet(); startSetup(true); return; }
+  if ('incomeOpen' in d) { closeSheet(); startSetup(true, 'income-only'); return; }
   if ('resplitOpen' in d) { closeSheet(); startSetup(true, 'split'); return; }
   if ('goalOpen' in d) { closeSheet(); startSetup(true, 'goal'); return; }
   if ('sharing' in d) {
@@ -1601,7 +1624,15 @@ app.addEventListener('input', e => {
   if ('goalname' in d) { draft.goal.name = t.value; draft.noGoal = false; draft.goalTouched = true; draft.adjust = 0; refreshGoalPreview(); return; }
   if (d.goalf) { t.value = d.goalf === 'pct' ? t.value.replace(/[^0-9.]/g, '').slice(0, 4) : clean(t.value); draft.goal[d.goalf] = t.value; draft.noGoal = false; draft.goalTouched = true; draft.adjust = 0; refreshGoalPreview(); return; }
   if ('goaldate' in d) { draft.goal.date = t.value; draft.goalTouched = true; draft.adjust = 0; renderSetup(false); return; }
-  if ('username' in d) { t.value = account.cleanUsername(t.value); draft.username = t.value; draft.userMsg = ''; refreshSetupFoot(); return; }
+  if (d.namef) {
+    if (d.namef === 'num') t.value = t.value.replace(/[^0-9]/g, '').slice(0, 2);
+    draft[d.namef] = t.value;
+    draft.userMsg = '';
+    const prev = viewsEl.querySelector('[data-uname-preview]');
+    if (prev) prev.innerHTML = usernamePreview(draftUsername());
+    refreshSetupFoot();
+    return;
+  }
   if (d.amt) { t.value = clean(t.value); const [kind, key] = d.amt.split(':'); rowsOf(kind).find(x => x.key === key).amount = t.value; refreshSetupFoot(); return; }
   if ('onhand' in d) { t.value = clean(t.value); draft.onHand = t.value; refreshSetupFoot(); return; }
   if (d.catamt) { t.value = t.value.replace(/\D/g, '').slice(0, 5); draft.cats[d.catamt] = Number(t.value) || 0; draft.splitEdited = true; refreshSetupFoot(); return; }

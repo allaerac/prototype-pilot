@@ -36,10 +36,10 @@ export const BILLS = [
 ];
 
 export const CONSENT = {
-  version: 3,
+  version: 4,
   title: 'Help us test this app',
   points: [
-    'We collect how you use the app (screens opened, purchases logged, survey answers), tied to a username you pick, not your real name.',
+    'We collect how you use the app (screens opened, purchases logged, survey answers), tied to your username: your name plus 2 numbers. Only the ESP201 team sees it.',
     'We never connect to your bank, and nothing you log is shared outside the ESP201 team.',
     'You can turn off any part of it, or all of it, in Settings, and the app keeps working on your phone.'
   ]

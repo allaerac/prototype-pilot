@@ -1,11 +1,14 @@
-// Usernames with no password (supabase/schema.sql: pilot_users and the pilot_* functions).
+// Usernames with no password, made of first.last + 2 numbers (supabase/schema.sql: pilot_users and the pilot_* functions).
 // A username links a student's events across phones, and the phone keeps a backup under it,
 // so logging in on a wiped phone brings their setup and purchases back.
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=40';
-import * as store from './store.js?v=40';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=41';
+import * as store from './store.js?v=41';
 
-export const USERNAME_OK = /^[a-z0-9_.]{3,20}$/;
-export const cleanUsername = v => v.toLowerCase().replace(/[^a-z0-9_.]/g, '').slice(0, 20);
+// Usernames are first name + last name + 2 numbers the student picks: austin.allaer27
+export const USERNAME_OK = /^[a-z]{1,20}\.[a-z]{1,20}[0-9]{2}$/;
+// Letters only, accents dropped (José → jose), so any name makes a valid username.
+export const namePart = v => (v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z]/g, '').slice(0, 20);
+export const makeUsername = (first, last, num) => `${namePart(first)}.${namePart(last)}${num || ''}`;
 export const backupOn = s => !(s.prefs && s.prefs.backup === false);
 
 async function rpc(fn, args, keepalive = false) {
