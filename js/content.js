@@ -2,6 +2,10 @@
 // Deals come from pilot/deals-research.md (only rows posted on the venue's own site).
 // Someone on the team must confirm each deal before the pilot starts, then set `checked` to that date.
 
+// Deals are switched off for the pilot: no Deals tab, no 21+ setting, no deals line in What we collect.
+// Set to true to bring them all back.
+export const SHOW_DEALS = false;
+
 export const APP_NAME = 'Prototype';
 
 // Miami's fall 2026 finals look like Dec 7–11. Confirm on the registrar's page before launch.

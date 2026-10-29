@@ -1,11 +1,14 @@
 // Prototype pilot app: setup, Home (ring + quick-log), Deals, Recap, sheets and limit alerts.
 // Rendering is plain template strings. State lives in store.js; pilot events go through track.js.
-import * as store from './store.js?v=41';
-import { track, flush, groupOn, dropGroup, tagQueue } from './track.js?v=41';
-import * as account from './account.js?v=41';
-import * as B from './budget.js?v=41';
-import { APP_VERSION } from './config.js?v=41';
-import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING, DEALS, QUOTES } from './content.js?v=41';
+import * as store from './store.js?v=42';
+import { track, flush, groupOn, dropGroup, tagQueue } from './track.js?v=42';
+import * as account from './account.js?v=42';
+import * as B from './budget.js?v=42';
+import { APP_VERSION } from './config.js?v=42';
+import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING as ALL_TRACKING, DEALS, QUOTES, SHOW_DEALS } from './content.js?v=42';
+// What we collect, minus the deals group while deals are switched off (content.js SHOW_DEALS)
+const TRACKING = ALL_TRACKING.filter(g => g.id !== 'deals' || SHOW_DEALS);
+if (!SHOW_DEALS) document.querySelectorAll('[data-tab="deals"]').forEach(b => b.remove());
 
 const S = store.get;
 const app = document.getElementById('app');
@@ -1178,6 +1181,7 @@ function enterApp(t) {
   go(t || 'home', true);
 }
 function go(t, force) {
+  if (t === 'deals' && !SHOW_DEALS) t = 'home';
   if (t === tab && !force) return;
   tab = t;
   renderApp(true);
@@ -1304,7 +1308,7 @@ function renderSheet() {
           <div class="set-row"><div><span>Send feedback</span><small>Questions, ideas, anything broken</small></div><button class="chip" data-sheet="feedback">Write</button></div>
           <div class="set-row"><div><span>Share usage with the team</span><button class="link" data-sheet="data">What we collect and why${s.consent && s.sharing ? ` (${TRACKING.filter(g => groupOn(s, g.id)).length} of ${TRACKING.length} on)` : ''} &rarr;</button></div><button class="switch" role="switch" aria-checked="${!!(s.consent && s.sharing)}" aria-label="Share usage with the team" data-sharing><i aria-hidden="true"></i></button></div>
           ${s.username ? `<div class="set-row"><div><span>Back up to @${esc(s.username)}</span><small>Log in on any phone to get it back</small></div><button class="switch" role="switch" aria-checked="${account.backupOn(s)}" aria-label="Back up to your username" data-backup><i aria-hidden="true"></i></button></div>` : ''}
-          <div class="set-row"><div><span>Show 21+ deals</span></div><button class="switch" role="switch" aria-checked="${s.prefs.show21}" aria-label="Show 21+ deals" data-toggle21><i aria-hidden="true"></i></button></div>
+          ${SHOW_DEALS ? `<div class="set-row"><div><span>Show 21+ deals</span></div><button class="switch" role="switch" aria-checked="${s.prefs.show21}" aria-label="Show 21+ deals" data-toggle21><i aria-hidden="true"></i></button></div>` : ''}
           ${!isStandalone() ? `<div class="set-row"><div><span>Add to Home Screen</span><small>Keeps your data safe</small></div>${installPrompt ? '<button class="chip" data-install>Install</button>' : ''}</div>` : ''}
           <div class="set-row"><div><span class="danger">Erase everything on this phone</span></div><button class="chip danger" data-reset>${confirmReset ? 'Tap again' : 'Erase'}</button></div>
         </div>

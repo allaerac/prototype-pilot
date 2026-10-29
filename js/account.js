@@ -1,8 +1,8 @@
 // Usernames with no password, made of first.last + 2 numbers (supabase/schema.sql: pilot_users and the pilot_* functions).
 // A username links a student's events across phones, and the phone keeps a backup under it,
 // so logging in on a wiped phone brings their setup and purchases back.
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=41';
-import * as store from './store.js?v=41';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=42';
+import * as store from './store.js?v=42';
 
 // Usernames are first name + last name + 2 numbers the student picks: austin.allaer27
 export const USERNAME_OK = /^[a-z]{1,20}\.[a-z]{1,20}[0-9]{2}$/;
