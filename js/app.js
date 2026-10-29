@@ -1,11 +1,13 @@
 // Prototype pilot app: setup, Home (ring + quick-log), Deals, Recap, sheets and limit alerts.
 // Rendering is plain template strings. State lives in store.js; pilot events go through track.js.
-import * as store from './store.js?v=42';
-import { track, flush, groupOn, dropGroup, tagQueue } from './track.js?v=42';
-import * as account from './account.js?v=42';
-import * as B from './budget.js?v=42';
-import { APP_VERSION } from './config.js?v=42';
-import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING as ALL_TRACKING, DEALS, QUOTES, SHOW_DEALS } from './content.js?v=42';
+import * as store from './store.js?v=45';
+import { track, flush, groupOn, dropGroup, tagQueue } from './track.js?v=45';
+import * as account from './account.js?v=45';
+import * as B from './budget.js?v=45';
+import { APP_VERSION } from './config.js?v=45';
+import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING as ALL_TRACKING, DEALS, QUOTES, SHOW_DEALS, THEME } from './content.js?v=45';
+// Color scheme: content.js THEME, or ?theme=graphite|classic on the link to try the other one
+{ const t = new URLSearchParams(location.search).get('theme'); document.documentElement.dataset.theme = ['classic', 'graphite'].includes(t) ? t : THEME; }
 // What we collect, minus the deals group while deals are switched off (content.js SHOW_DEALS)
 const TRACKING = ALL_TRACKING.filter(g => g.id !== 'deals' || SHOW_DEALS);
 if (!SHOW_DEALS) document.querySelectorAll('[data-tab="deals"]').forEach(b => b.remove());
@@ -68,6 +70,27 @@ const catRing = (key, color, pct) => `
       stroke-opacity="${pct > 0 ? 1 : 0}" stroke-dasharray="${CC.toFixed(2)}" stroke-dashoffset="${CC.toFixed(2)}" transform="rotate(-90 30 30)"/>
   </svg>`;
 
+// The week gauge (Home and Recap): the arc is how much of the week's money is used, there's a dot for each day
+// of the week, and a hollow marker shows where spending should be by the end of today (left out on Recap).
+function gaugeSVG(key, pct, expected, seal) {
+  const r = 52, CG = 2 * Math.PI * r;
+  const ticks = [0, 1, 2, 3, 4, 5, 6].map(i => {
+    const a = (i / 7) * 2 * Math.PI - Math.PI / 2;
+    return `<circle cx="${(60 + Math.cos(a) * 61).toFixed(2)}" cy="${(60 + Math.sin(a) * 61).toFixed(2)}" r="1" class="g-tick"/>`;
+  }).join('');
+  const ea = (expected || 0) * 2 * Math.PI - Math.PI / 2;
+  const marker = expected == null ? '' : `<circle cx="${(60 + Math.cos(ea) * r).toFixed(2)}" cy="${(60 + Math.sin(ea) * r).toFixed(2)}" r="4" class="g-mark"/>`;
+  const sealRing = seal ? `<circle class="seal" data-key="seal-${key}" data-pct="1" cx="60" cy="60" r="58" fill="none" stroke-width="1.5" stroke-linecap="round"
+      stroke-dasharray="${(2 * Math.PI * 58).toFixed(2)}" stroke-dashoffset="${(2 * Math.PI * 58).toFixed(2)}" transform="rotate(-90 60 60)"/>` : '';
+  return `<svg viewBox="0 0 120 120" aria-hidden="true">
+    ${seal ? '' : ticks}${sealRing}
+    <circle cx="60" cy="60" r="${r}" fill="none" class="g-track" stroke-width="5"/>
+    <circle class="arc" data-key="${key}" data-pct="${pct}" cx="60" cy="60" r="${r}" fill="none" stroke-width="5" stroke-linecap="round"
+      stroke-opacity="${pct > 0 ? 1 : 0}" stroke-dasharray="${CG.toFixed(2)}" stroke-dashoffset="${CG.toFixed(2)}" transform="rotate(-90 60 60)"/>
+    ${marker}
+  </svg>`;
+}
+
 // Fill every ring from its last value (or empty) to its new value.
 function animateRings(root) {
   root.querySelectorAll('.arc, .seal, .cat-arc').forEach(a => {
@@ -116,7 +139,7 @@ function fitAll() {
       // too tall = anything reaching into the space kept free for the tab bar
       const over = () => {
         const limit = v.getBoundingClientRect().bottom - parseFloat(v.style.paddingBottom) + 1;
-        return [...v.querySelectorAll('.vhead, .card, .view-note, .rtabs, .nudge')].some(e => e.getBoundingClientRect().bottom > limit);
+        return [...v.querySelectorAll('.vhead, .card, .view-note, .rtabs, .nudge, [data-fit]')].some(e => e.getBoundingClientRect().bottom > limit);
       };
       fitLists(); fitScale(v, v, over);
     }
@@ -531,7 +554,7 @@ function setupBody(name) {
         <span class="s-soft" data-r-sub>${bits.sub}</span>
         ${g && p.hi > p.lo ? `<div class="pace-pick">
           <span class="s-mono">How hard do you want to go at ${esc(g.name)}?</span>
-          <div class="chips pace-chips">${[['lo', 'Conservative', p.lo, ''], ['mid', 'Middle', p.mid, ' · our pick'], ['hi', 'Aggressive', p.hi, '']].map(([k, label, v, note]) =>
+          <div class="chips pace-chips">${[['lo', 'Conservative', p.lo, ''], ['mid', 'Our pick', p.mid, ''], ['hi', 'Aggressive', p.hi, '']].map(([k, label, v, note]) =>
             `<button class="chip${save === v ? ' sel' : ''}" data-pace="${k}" data-pace-v="${v}"><b>${label}</b><small>${money(v)}/wk${note}</small></button>`).join('')}</div>
           <input type="range" class="save-range" min="${p.lo}" max="${p.hi}" step="1" value="${save}" data-save aria-label="Dollars a week for ${esc(g.name)}" style="--v:${((save - p.lo) / (p.hi - p.lo) * 100).toFixed(1)}%">
           <div class="scale-ends"><span>${money(p.lo)}/wk · spend more</span><span>save more · ${money(p.hi)}/wk</span></div>
@@ -832,7 +855,7 @@ function vhead(eyebrow, title, right) {
   </div>`;
 }
 // The line at the bottom of every tab: where to send feedback or look for answers.
-const feedbackNote = () => `<button class="view-note" data-sheet="settings">Questions or ideas? <b>Settings</b> → <b>Send feedback</b></button>`;
+const feedbackNote = () => `<button class="view-note" data-sheet="settings" data-fit>Questions or ideas? <b>Settings</b> → <b>Send feedback</b></button>`;
 function streakLabel() {
   const n = B.streak(S(), store.now());
   const closed = B.closedWeeks(S(), store.now()).length;
@@ -852,60 +875,71 @@ function homeHTML() {
   const daysLeft = B.daysLeftInWeek(now);
   const total = weekDays(wk);
   const elapsed = Math.max(0, total - daysLeft);
-  let pace, warm = false;
-  if (w.budget <= 0) { pace = 'Set a weekly number in Settings'; warm = true; }
-  else if (w.left <= 0) { warm = true; pace = w.left < 0 ? `${money(-w.left)} past this week's number · resets Monday` : `That's this week's number · resets Monday`; }
+  const expected = (elapsed + 1) / total;   // share of the week's money that's fine to have spent by tonight
+  let state = 'ok', pace;
+  if (w.budget <= 0) { state = 'ahead'; pace = '<b>No weekly number yet.</b> Set one in Settings.'; }
+  else if (w.left < 0) { state = 'over'; pace = `<b>Over by ${money(-w.left)}.</b> Monday starts fresh.`; }
+  else if (w.left === 0) { state = 'over'; pace = `<b>That's this week's number.</b> Monday starts fresh.`; }
   else {
     const perDay = Math.floor(w.left / daysLeft);
-    const expected = w.budget * (elapsed + 1) / total;   // what's fine to have spent by the end of today
-    if (w.spent <= expected + 0.5) pace = `On pace · about ${money(perDay)} a day keeps you there`;
-    else { warm = true; pace = `About ${money(perDay)} a day for the rest of the week`; }
+    if (w.spent <= w.budget * expected + 0.5) pace = `<b>On pace.</b> About ${money(perDay)} a day keeps you there.`;
+    else { state = 'ahead'; pace = `<b>A little ahead.</b> About ${money(perDay)} a day from here.`; }
   }
-  const items = w.items.slice().sort((a, b) => (a.at < b.at ? 1 : -1));
-  const rows = items.map(txRow).join('');
-  return `<section class="view" data-view="home" aria-label="Home">
-    ${vhead(`<span class="only-portrait">${streakLabel().short} &middot; </span>${weekRange(wk)}`, greeting(now))}
-    <div class="grid2">
-      <div class="card hero">
-        <div class="hero-top">${streakPill()}</div>
-        <div class="big-ring">
-          ${ringSVG('home', Math.min(1, w.pct))}
-          <div class="ring-center">
-            <span class="s-mono">Left this week</span>
-            <span class="ring-num">${money(Math.max(0, w.left))}</span>
-            <span class="s-soft">of ${money(w.budget)} &middot; ${Math.round(w.pct * 100)}% used</span>
-          </div>
+  const { label: streakText } = streakLabel();
+  // categories: what's left in each (with the split), or what's been spent (older setups without one)
+  const catRows = split
+    ? B.categoryLeft(split, w.budget, spentBy).map(r => {
+        const c = catOf(r.id);
+        const used = r.budget > 0 ? 1 - r.left / r.budget : (r.spent > 0 ? 1 : 0);
+        const over = r.over >= 0.5;
+        return row2(esc(c.name) + (r.covered >= 0.5 && !over ? ` <small>· ${money(r.covered)} covering</small>` : ''),
+          over ? `${money(r.over)} over` : `${money(r.left)} left`, over ? 'warn' : '', used, c.color, over);
+      }).join('')
+    : activeCats().map(c => row2(esc(c.name), `${money(spentBy[c.id] || 0)} spent`, '', w.budget > 0 ? (spentBy[c.id] || 0) / w.budget : 0, c.color)).join('');
+  const last = w.items.slice().sort((a, b) => (a.at < b.at ? 1 : -1))[0];
+  return `<section class="view v2" data-view="home" aria-label="Home">
+    <div class="col-a">
+      ${top2(`${SHORT[now.getDay()]}, ${MONTHS[now.getMonth()]} ${now.getDate()} &middot; ${streakText}`)}
+      <div class="hero2" data-fit>
+        <div class="hero2-l">
+          <span class="hk">Left this week</span>
+          <span class="hbig fig"><span class="cur">$</span>${Math.floor(Math.max(0, w.left)).toLocaleString('en-US')}</span>
+          <span class="hsub">of ${money(w.budget)} &middot; ${daysLeft === 1 ? 'last day' : daysLeft + ' days left'}</span>
         </div>
-        <span class="pace${warm ? ' warm' : ''}">${pace}</span>
+        <div class="gauge ${state}">
+          ${gaugeSVG('home', Math.min(1, w.pct), w.budget > 0 ? Math.min(1, expected) : null)}
+          <div class="gauge-c"><b>${Math.round(w.pct * 100)}%</b><span>used</span></div>
+        </div>
       </div>
-      <div class="col">
-        ${stressCardHTML()}
-        ${goalCardHTML()}
-        <div class="card">
-          ${split ? `<div class="card-head"><b>By category</b><span class="s-mono">left to spend</span></div>
-          <div class="cats" style="${catCols(split.order.length)}">${B.categoryLeft(split, w.budget, spentBy).map(r => {
-            const c = catOf(r.id);
-            // the ring fills as the category gets used up, including money it gave to cover another one
-            const used = r.budget > 0 ? 1 - r.left / r.budget : (r.spent > 0 ? 1 : 0);
-            const note = r.over >= 0.5 ? `${money(r.over)} over` : r.covered >= 0.5 ? `−${money(r.covered)} to cover` : `of ${money(r.budget)}`;
-            return `<div class="cat${r.over >= 0.5 ? ' over' : ''}"><div class="cat-ring">${catRing('cat-' + c.id, c.color, Math.min(1, used))}<span>${money(r.left)}</span></div><b>${esc(c.name)}</b><em>${note}</em></div>`;
-          }).join('')}</div>`
-          : `<div class="card-head"><b>By category</b><span class="s-mono">of ${money(w.budget)}</span></div>
-          <div class="cats" style="${catCols(activeCats().length)}">${activeCats().map(c => {
-            const spent = spentBy[c.id] || 0;
-            const pct = w.budget > 0 ? spent / w.budget : 0;
-            return `<div class="cat"><div class="cat-ring">${catRing('cat-' + c.id, c.color, Math.min(1, pct))}<span>${Math.round(pct * 100)}%</span></div><b>${esc(c.name)}</b><em>${money(spent)}</em></div>`;
-          }).join('')}</div>`}
-        </div>
-        <div class="card fill">
-          <div class="card-head"><b>Logged this week <span class="s-mono">${items.length}</span></b>${items.length ? `<button class="link" data-sheet="purchases">See all &rarr;</button>` : ''}</div>
-          ${items.length ? `<div class="list scrolls">${rows}</div>`
-          : `<div class="empty"><b>Nothing logged yet</b><span class="s-soft">Tap + after you buy something. It takes 5 seconds.</span></div>`}
-        </div>
+      <p class="pace2 ${state}" data-fit>${pace}</p>
+    </div>
+    <div class="col-b">
+      <div class="sec" data-fit>
+        <h2 class="sec-h">By category<span>${split ? 'left to spend' : 'spent this week'}</span></h2>
+        ${catRows}
+      </div>
+      <div class="sec" data-fit>
+        <h2 class="sec-h">${S().setup && S().setup.goal ? 'Goal and check-in' : 'Check-in'}</h2>
+        ${goalRowHTML()}
+        ${stressRowHTML()}
+        ${last
+          ? `<button class="r2" data-sheet="purchases"><span class="r2-n">Last: ${esc(last.note || catOf(last.cat).name)} <small>· ${when(last.at)}</small></span><span class="r2-v">−${money(last.amount, true)}<span class="r2-chev" aria-hidden="true">›</span></span></button>`
+          : `<div class="r2"><span class="r2-n">Nothing logged yet</span><span class="r2-v">Tap + after you buy something</span></div>`}
       </div>
     </div>
-    ${feedbackNote()}
   </section>`;
+}
+// One list row: name, value, and a thin bar underneath (used for categories, goal and Recap's breakdown).
+function row2(name, value, valueClass, fill, color, over) {
+  return `<div class="r2"><span class="r2-n">${name}</span><span class="r2-v ${valueClass || ''}">${value}</span>
+    <span class="r2-bar"><i class="${over ? 'warn' : ''}" style="width:${(Math.max(0, Math.min(1, fill || 0)) * 100).toFixed(1)}%;--c:${color || 'var(--ink)'}"></i></span></div>`;
+}
+// Screen header: a small line on top (date, streak), an optional title, and Settings.
+function top2(line, title) {
+  return `<div class="top2" data-fit>
+    <div class="top2-l"><span class="hdate">${line}</span>${title ? `<h1 class="htitle">${title}</h1>` : ''}</div>
+    <button class="icon-btn" data-sheet="settings" aria-label="Settings">${gearIcon}</button>
+  </div>`;
 }
 let stressEdit = false;   // "Change" on the one-line stress card opens the slider again
 
@@ -915,7 +949,7 @@ const catCols = n => `--n:${n <= 6 ? Math.max(1, n) : Math.ceil(n / 2)};--np:${n
 
 // The savings goal on Home: a ring that fills as on-track weeks add up, and a line that cheers them on.
 // "Every" and percent goals fill per month; "by a date" goals fill toward the total.
-function goalCardHTML() {
+function goalRowHTML() {
   const s = S(), goal = s.setup && s.setup.goal;
   if (!goal) return '';
   const now = store.now();
@@ -924,39 +958,21 @@ function goalCardHTML() {
   const have = byDate ? g.total + g.pending : g.month;
   const target = byDate ? goal.target : (goal.kind === 'every' && goal.freq === 'monthly' ? goal.amount : Math.round(goal.perWeek * 52 / 12));
   const pct = target > 0 ? Math.min(1, have / target) : 0;
-  const cheer = pct >= 1 ? "Goal hit! Let's go 🎉" : pct >= 0.75 ? 'Almost there!' : pct >= 0.5 ? 'Halfway there, keep it up' : pct >= 0.25 ? 'Building up, keep going' : have > 0 ? 'Off to a good start' : "Let's get it started";
   const when = byDate ? `by ${MONTHS[B.parseKey(goal.date).getMonth()]} ${B.parseKey(goal.date).getDate()}` : 'this month';
-  return `<div class="card goal-card${pct >= 1 ? ' hit' : ''}">
-    <div class="cat-ring">${catRing('goal', '#3BCFBF', pct)}<span>${Math.round(pct * 100)}%</span></div>
-    <div class="goal-text">
-      <span class="s-mono">Saving for</span>
-      <b>${esc(goal.name)} <span class="goal-cheer">· ${cheer}</span></b>
-      <span class="s-soft">${money(have)} of ${money(target)} ${when}${g.pending > 0 && pct < 1 ? ` · +${money(g.pending)} this week<span class="long"> if you stay on track</span>` : ''}</span>
-    </div>
-  </div>`;
+  return pct >= 1
+    ? row2(esc(goal.name), 'Goal hit', 'good', 1, 'var(--good)')
+    : row2(esc(goal.name), `${money(have)} of ${money(target)} ${when}`, '', pct, 'var(--good)');
 }
 
 // Once a day: how stressed about money are they, 0 to 100%. When it's high, a reminder of where they're headed.
-function stressCardHTML() {
+// Once a day: how stressed about money are they, 0 to 100%. The row opens a sheet with the slider.
+function stressRowHTML() {
   const s = S();
   if (!s.setup) return '';
-  const today = B.dateKey(store.now());
-  const v = (s.stressDaily || {})[today];
-  const answered = v != null;
-  // once answered it shrinks to one line, so Home keeps room for the week's purchases
-  if (answered && !stressEdit) {
-    return `<div class="card stress-card mini">
-      <span>Money stress today</span><b class="${v >= 60 ? 'high' : ''}">${v}%</b>
-      <button class="link" data-stress-edit>Change</button>
-    </div>`;
-  }
-  // one line: label, slider, value, Save (it wraps only on very narrow screens)
-  return `<div class="card stress-card">
-    <div class="stress-line"><b>Money stress</b>
-      <input type="range" class="stress-range${answered ? ' set' : ''}" min="0" max="100" step="1" value="${answered ? v : 50}" data-stressday aria-label="How stressed about money are you today, from chill (0) to super stressed (100)" style="--v:${answered ? v : 50}%">
-      <span class="s-mono sval">${answered ? v + '%' : '–'}</span><button class="chip sel stress-save" data-stress-save>Save</button></div>
-    <div class="scale-ends"><span>Chill</span><span>Super stressed</span></div>
-  </div>`;
+  const v = (s.stressDaily || {})[B.dateKey(store.now())];
+  return v == null
+    ? `<button class="r2" data-sheet="stress"><span class="r2-n">Money stress today</span><span class="r2-act">Rate</span></button>`
+    : `<button class="r2" data-sheet="stress"><span class="r2-n">Money stress today</span><span class="r2-v ${v >= 60 ? 'warn' : ''}">${v}%<span class="r2-chev" aria-hidden="true">›</span></span></button>`;
 }
 // The "take a breath" note for a high stress answer: where they're headed if they keep going.
 function easeMessage() {
@@ -1106,11 +1122,10 @@ function recapHTML() {
   const closed = B.closedWeeks(s, now).slice(-7);
   const empty = final && !w.items.length;
   const sealed = final && under && w.budget > 0 && !empty;
-  const seal = sealed ? `<circle class="seal" data-key="seal-${wk}" data-pct="1" cx="100" cy="100" r="98" fill="none" stroke="#3BCFBF" stroke-width="3.5" stroke-linecap="round"
-      stroke-dasharray="${(2 * Math.PI * 98).toFixed(2)}" stroke-dashoffset="${(2 * Math.PI * 98).toFixed(2)}" transform="rotate(-90 100 100)"/>` : '';
-  const head = kind === 'first' ? 'Your first recap lands Sunday.' : empty ? 'Nothing logged that week.' : sealed ? 'You closed the week.' : 'A heavier week.';
-  const sub = kind === 'first' ? `${money(w.spent, true)} spent so far` : empty ? 'Tap + as you spend and the ring tracks your week.' : sealed ? `${money(w.budget - w.spent)} under budget` : `That happens. Monday is a fresh start.`;
+  const head = kind === 'first' ? 'Your first recap lands Sunday' : empty ? 'Nothing logged that week' : sealed ? 'You closed the week' : 'A heavier week';
+  const sub = kind === 'first' ? `${money(w.spent, true)} spent so far` : empty ? 'Tap + as you spend and the ring tracks your week.' : sealed ? `${money(w.budget - w.spent)} under budget` : 'That happens. Monday is a fresh start.';
   const total = w.spent;
+  const days = kind === 'first' ? Math.max(1, weekDays(wk) - B.daysLeftInWeek(now) + 1) : weekDays(wk);
   // the student's categories, plus any removed one that still has spending this week
   const shownCats = [...activeCats(), ...allCats().filter(c => c.off && w.spentBy[c.id] > 0)];
   const quote = QUOTES[Math.abs(Math.floor(B.startOfDay(now) / 864e5)) % QUOTES.length];
@@ -1118,44 +1133,43 @@ function recapHTML() {
   // the week's daily stress answers, their average, and the change from the week before
   const weekStress = key => {
     const start = B.parseKey(key);
-    const days = [0, 1, 2, 3, 4, 5, 6].map(i => { const d = B.addDays(start, i); return { label: DAYS[d.getDay()].slice(0, 1), v: (s.stressDaily || {})[B.dateKey(d)] }; });
-    const vals = days.filter(d => d.v != null).map(d => d.v);
-    return { days, avg: vals.length ? Math.round(vals.reduce((t, v) => t + v, 0) / vals.length) : null };
+    const ds = [0, 1, 2, 3, 4, 5, 6].map(i => { const d = B.addDays(start, i); return { label: DAYS[d.getDay()].slice(0, 1), v: (s.stressDaily || {})[B.dateKey(d)] }; });
+    const vals = ds.filter(d => d.v != null).map(d => d.v);
+    return { days: ds, avg: vals.length ? Math.round(vals.reduce((t, v) => t + v, 0) / vals.length) : null };
   };
   const stress = weekStress(wk);
   const before = weekStress(B.dateKey(B.addDays(B.parseKey(wk), -7)));
   stress.change = stress.avg != null && before.avg != null ? stress.avg - before.avg : null;
-  return `<section class="view" data-view="recap" aria-label="Recap">
-    ${vhead(`${kind === 'first' ? 'This week' : kind === 'closing' ? 'Tonight' : 'Last week'} &middot; ${weekRange(wk)}`, 'Your week, recapped')}
-    <div class="grid2 recap-grid">
-      <div class="card recap-hero">
-        <div class="recap-rings">
-          ${ringSVG('recap-' + wk, Math.min(1, w.pct), seal)}
-          <div class="check"><span class="s-mono">Spent</span><strong>${money(w.spent)}</strong><span class="s-soft">of ${money(w.budget)}</span></div>
-          ${sealed ? [0, 45, 90, 135, 180, 225, 270, 315].map((a, i) => `<span class="spark" style="--a:${a}deg;background:${['#6474FF', '#3BCFBF', '#FF9FBD'][i % 3]}"></span>`).join('') : ''}
-        </div>
-        <div><h4>${head}</h4><span class="s-soft">${sub}</span>
-          ${kind === 'closing' ? '' : `<span class="recap-next">${kind === 'first' ? "It's ready Sunday at 6 pm, and you'll get a notification in the app when it is." : "Next recap: Sunday at 6 pm. You'll get a notification in the app when it's ready."}</span>`}
-          <div class="only-portrait-block" style="margin-top:.6em">${streakPill()}</div></div>
+  const panel = rtab === 'spent'
+    ? `<h2 class="sec-h">Where it went<span>${money(total)} total</span></h2>
+       ${shownCats.map(c => row2(esc(c.name), money(w.spentBy[c.id] || 0), '', total > 0 ? (w.spentBy[c.id] || 0) / total : 0, c.color)).join('')}
+       <div class="weeks2"><span>Last weeks</span><span class="weeks">${closed.map(c => (B.counts(c) ? miniRing(0) : faintRing)).join('')}${kind === 'closing' ? (under && w.items.length ? miniRing(0) : faintRing) : dashedRing}</span></div>`
+    : rtab === 'headed' ? projectionHTML()
+    : rtab === 'stress' ? `
+      <h2 class="sec-h">Money stress<span>${stress.avg == null ? 'Answer on Home each day' : `${stress.avg}% average`}${stress.change != null && stress.change !== 0 ? ` · ${stress.change < 0 ? 'down' : 'up'} ${Math.abs(stress.change)}` : ''}</span></h2>
+      <div class="stress-week">${stress.days.map(d => `<div><i style="--v:${d.v == null ? 0 : d.v}%" class="${d.v == null ? 'none' : ''}"></i><span>${d.label}</span></div>`).join('')}</div>`
+    : `<div class="tip"><h2 class="sec-h">Quote of the day</h2><p>“${esc(quote.text)}”</p><span class="s-soft quote-by">${esc(quote.by)}</span></div>`;
+  return `<section class="view v2" data-view="recap" aria-label="Recap">
+    <div class="col-a">
+      ${top2(`${kind === 'first' ? 'This week' : kind === 'closing' ? 'Tonight' : 'Last week'} &middot; ${weekRange(wk)}`, 'Your week')}
+      <div class="gauge big ${sealed ? 'good' : !under ? 'over' : ''}" data-fit>
+        ${gaugeSVG('recap-' + wk, Math.min(1, w.pct), null, sealed)}
+        <div class="gauge-c"><b>${money(w.spent)}</b><span>of ${money(w.budget)} spent</span></div>
       </div>
-      <div class="rcol">
-        ${survey ? `<button class="nudge" data-sheet="survey"><span><b>Got 30 seconds?</b> <span class="s-soft">Tell us how the app is going.</span></span><span aria-hidden="true">&rarr;</span></button>` : ''}
-        <div class="chips rtabs" role="tablist">${RECAP_TABS.map(([id, label]) => `<button class="chip${rtab === id ? ' sel' : ''}" role="tab" aria-selected="${rtab === id}" data-rtab="${id}">${label}</button>`).join('')}</div>
-        <div class="card rpanel" role="tabpanel">${rtab === 'spent' ? `
-          <div class="card-head"><b>Where it went</b><span class="s-mono">${money(total)} total</span></div>
-          <div class="bar">${total > 0 ? shownCats.map(c => w.spentBy[c.id] > 0 ? `<span style="width:${(w.spentBy[c.id] / total * 100).toFixed(1)}%;background:${c.color}"></span>` : '').join('') : ''}</div>
-          <div class="legend">${shownCats.map(c => `<div><i style="background:${c.color}"></i>${esc(c.name)}<b>${money(w.spentBy[c.id] || 0)}</b></div>`).join('')}</div>
-          <div class="card-head streak-head"><b>Streak</b><span class="s-mono">${n} ${n === 1 ? 'week' : 'weeks'} in a row</span></div>
-          <div class="weeks">${closed.map(c => (B.counts(c) ? miniRing(0) : faintRing)).join('')}${kind === 'closing' ? (under && w.items.length ? miniRing(0) : faintRing) : dashedRing}</div>`
-        : rtab === 'headed' ? projectionHTML()
-        : rtab === 'stress' ? `
-          <div class="card-head"><b>Money stress</b><span class="s-mono">${stress.avg == null ? 'Answer on Home each day' : `${stress.avg}% average`}${stress.change != null && stress.change !== 0 ? ` · ${stress.change < 0 ? 'down' : 'up'} ${Math.abs(stress.change)} from last week` : ''}</span></div>
-          <div class="stress-week">${stress.days.map(d => `<div><i style="--v:${d.v == null ? 0 : d.v}%" class="${d.v == null ? 'none' : ''}"></i><span>${d.label}</span></div>`).join('')}</div>`
-        : `<div class="tip"><div class="card-head"><b>Quote of the day</b></div><p>“${esc(quote.text)}”</p><span class="s-soft quote-by">${esc(quote.by)}</span></div>`}
-        </div>
+      <div class="verdict2" data-fit><h2>${head}</h2><p>${sub}</p></div>
+      <div class="stats2" data-fit>
+        <div><b>${money(total / days)}</b><span>a day</span></div>
+        <div><b>${w.items.length}</b><span>${w.items.length === 1 ? 'purchase' : 'purchases'}</span></div>
+        <div><b>${n}</b><span>${n === 1 ? 'week' : 'weeks'} in a row</span></div>
       </div>
+      ${kind === 'closing' ? '' : `<p class="rnext" data-fit>${kind === 'first' ? 'Ready Sunday at 6 pm.' : 'Next recap Sunday at 6 pm.'} You'll get a notification in the app.</p>`}
     </div>
-    ${feedbackNote()}
+    <div class="col-b">
+      ${survey ? `<button class="r2 nudge2" data-sheet="survey" data-fit><span class="r2-n"><b>Got 30 seconds?</b> <small>Tell us how the app is going.</small></span><span class="r2-chev" aria-hidden="true">›</span></button>` : ''}
+      <div class="seg2" role="tablist" data-fit>${RECAP_TABS.map(([id, label]) => `<button class="${rtab === id ? 'on' : ''}" role="tab" aria-selected="${rtab === id}" data-rtab="${id}">${label}</button>`).join('')}</div>
+      <div class="rpanel2" role="tabpanel" data-fit>${panel}</div>
+      ${feedbackNote()}
+    </div>
   </section>`;
 }
 
@@ -1170,10 +1184,21 @@ function renderApp(animate) {
     b.classList.toggle('on', on);
     b.setAttribute('aria-current', on ? 'page' : 'false');
   });
+  placePill();
   animateRings(view);
   fitAll();
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitAll);
 }
+
+// The tab bar's highlight is one pill that slides to the current tab.
+function placePill() {
+  const pill = app.querySelector('.tab-pill'), on = app.querySelector('.tabbar [data-tab].on');
+  if (!pill || !on) return;
+  pill.style.width = on.offsetWidth + 'px';
+  pill.style.transform = `translateX(${on.offsetLeft - 4}px)`;
+}
+addEventListener('resize', placePill);
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(placePill);
 
 function enterApp(t) {
   mode = 'app';
@@ -1183,8 +1208,13 @@ function enterApp(t) {
 function go(t, force) {
   if (t === 'deals' && !SHOW_DEALS) t = 'home';
   if (t === tab && !force) return;
+  const morph = !force && document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches;
   tab = t;
-  renderApp(true);
+  if (morph) {
+    // the browser skips the morph when the page is hidden; the screen still switches, so those rejections are expected
+    const vt = document.startViewTransition(() => renderApp(false));
+    vt.ready.catch(() => {}); vt.finished.catch(() => {}); vt.updateCallbackDone.catch(() => {});
+  } else renderApp(true);
   track('screen_view', { screen: t });
   if (t === 'recap') {
     const r = recapWeek();
@@ -1259,6 +1289,16 @@ function renderSheet() {
       </div>
       <div class="keypad">${['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', 'del'].map(k => `<button data-key="${k}" aria-label="${k === 'del' ? 'Delete' : k}">${k === 'del' ? backspace : k}</button>`).join('')}</div>
       <button class="cta" data-save-tx ${valid ? '' : 'disabled'}>${valid ? 'Add ' + money(Number(logDraft.amount), true) : 'Enter an amount'}</button>`;
+  } else if (sheet === 'stress') {
+    const v = (s.stressDaily || {})[B.dateKey(store.now())];
+    const val = v == null ? 50 : v;
+    html = `${sheetHead('Money stress today')}
+      <div class="stress-card stress-sheet">
+        <span class="stress-big sval">${v == null ? '–' : v + '%'}</span>
+        <input type="range" class="stress-range${v == null ? '' : ' set'}" min="0" max="100" step="1" value="${val}" data-stressday aria-label="How stressed about money are you today, from chill (0) to super stressed (100)" style="--v:${val}%">
+        <div class="scale-ends"><span>Chill</span><span>Super stressed</span></div>
+      </div>
+      <button class="cta" data-stress-save>Save</button>`;
   } else if (sheet === 'purchases') {
     const groups = {};
     s.tx.slice().sort((a, b) => (a.at < b.at ? 1 : -1)).forEach(x => { (groups[B.weekKey(new Date(x.at))] ||= []).push(x); });
@@ -1593,13 +1633,14 @@ app.addEventListener('change', e => {
 
 // The daily stress slider saves when they tap Save, then Home redraws (with the reminder if it's high).
 function saveStress() {
-  const t = viewsEl.querySelector('[data-stressday]');
+  const t = document.querySelector('[data-stressday]');
   if (!t) return;
   const v = Number(t.value), day = B.dateKey(store.now());
   const first = S().stressDaily == null || S().stressDaily[day] == null;
   store.update(st => { st.stressDaily = { ...(st.stressDaily || {}), [day]: v }; });
   track('stress_daily', { day, pct: v, first_today: first });
   stressEdit = false;
+  closeSheet();
   renderApp(false);
   if (v >= 60) showToast('Take a breath', easeMessage());
 }

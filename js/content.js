@@ -6,6 +6,11 @@
 // Set to true to bring them all back.
 export const SHOW_DEALS = false;
 
+// Color scheme for the whole app. 'classic' is the original navy with the violet, mint and blush ring.
+// 'graphite' is the quieter neutral one from the design preview. Change this one word to switch.
+// (Add ?theme=graphite or ?theme=classic to the link to try one without changing anything.)
+export const THEME = 'classic';
+
 export const APP_NAME = 'Prototype';
 
 // Miami's fall 2026 finals look like Dec 7–11. Confirm on the registrar's page before launch.

@@ -4,7 +4,7 @@ A phone web app (PWA) for the ESP201 student pilot. It's plain HTML, CSS and Jav
 
 | File | What it is |
 |---|---|
-| `index.html`, `styles.css` | The page and the design system (same look as the class demo) |
+| `index.html`, `styles.css` | The page and the design system (rules in `../design/DESIGN.md`; two color schemes) |
 | `js/app.js` | Screens: setup, Home, Deals, Recap, sheets, alerts |
 | `js/budget.js` | The weekly-number formula, category split, savings goal, weeks, streaks (tested) |
 | `js/content.js` | **Team-editable:** semester end date, deals, quotes, consent wording, what-we-collect reasons |
@@ -32,6 +32,14 @@ node app/test/budget.test.mjs
 3. **Deals:** call or visit each venue in `DEALS` (`js/content.js`), delete anything that's wrong, and fill in `checked` with the date. The research and sources are in `pilot/deals-research.md`.
 4. **Copy review:** the team reads the consent text (`CONSENT`) and Recap's quotes (`QUOTES`, stand-ins for money tips for now) for tone and legal framing. Ask the instructor whether collecting this data needs approval.
 5. **Phones:** students must **add it to their Home Screen**. On iPhone, Safari can erase a website's saved data after 7 days without a visit, but not an installed app's.
+
+## Color scheme, and going back to the old design
+- **Switch colors:** set `THEME` in `js/content.js` to `'classic'` (navy with the violet-mint-blush ring, the default) or `'graphite'` (neutral, color only for warnings). To try one without changing anything, add `?theme=graphite` or `?theme=classic` to the link.
+- **Go back to the old design entirely:** the version from before the redesign is saved as the git tag `classic`. To put it back live, in the `app` folder run:
+  ```bash
+  git checkout main && git reset --hard classic && git push --force origin main
+  ```
+  GitHub Pages republishes in a minute or two. Students' data is unaffected (it lives on their phones and in Supabase).
 
 ## Deploy for free (GitHub Pages)
 1. Put the contents of `app/` in a **public** GitHub repo.
