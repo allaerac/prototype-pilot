@@ -1,11 +1,11 @@
 // Prototype pilot app: setup, Home (ring + quick-log), Deals, Recap, sheets and limit alerts.
 // Rendering is plain template strings. State lives in store.js; pilot events go through track.js.
-import * as store from './store.js?v=42';
-import { track, flush, groupOn, dropGroup, tagQueue } from './track.js?v=42';
-import * as account from './account.js?v=42';
-import * as B from './budget.js?v=42';
-import { APP_VERSION } from './config.js?v=42';
-import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING as ALL_TRACKING, DEALS, QUOTES, SHOW_DEALS } from './content.js?v=42';
+import * as store from './store.js?v=46';
+import { track, flush, groupOn, dropGroup, tagQueue } from './track.js?v=46';
+import * as account from './account.js?v=46';
+import * as B from './budget.js?v=46';
+import { APP_VERSION } from './config.js?v=46';
+import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING as ALL_TRACKING, DEALS, QUOTES, SHOW_DEALS } from './content.js?v=46';
 // What we collect, minus the deals group while deals are switched off (content.js SHOW_DEALS)
 const TRACKING = ALL_TRACKING.filter(g => g.id !== 'deals' || SHOW_DEALS);
 if (!SHOW_DEALS) document.querySelectorAll('[data-tab="deals"]').forEach(b => b.remove());
@@ -872,7 +872,7 @@ function homeHTML() {
           ${ringSVG('home', Math.min(1, w.pct))}
           <div class="ring-center">
             <span class="s-mono">Left this week</span>
-            <span class="ring-num">${money(Math.max(0, w.left))}</span>
+            <span class="ring-num">${money(Math.floor(Math.max(0, w.left)))}</span>
             <span class="s-soft">of ${money(w.budget)} &middot; ${Math.round(w.pct * 100)}% used</span>
           </div>
         </div>
@@ -1032,8 +1032,11 @@ function dealsHTML() {
 function recapWeek() {
   const now = store.now();
   const cur = B.weekKey(now);
-  if (now.getDay() === 0 && now.getHours() >= 18) return { wk: cur, kind: 'closing' };
-  const closed = B.closedWeeks(S(), now);
+  // a first week of two days or less (signed up on Saturday or Sunday) gets no recap of its own:
+  // the first one comes the next Sunday. Its numbers still go into week_closed for the pilot data.
+  const stub = wk => weekDays(wk) <= 2;
+  if (now.getDay() === 0 && now.getHours() >= 18 && !stub(cur)) return { wk: cur, kind: 'closing' };
+  const closed = B.closedWeeks(S(), now).filter(w => !stub(w.wk));
   if (closed.length) return { wk: closed[closed.length - 1].wk, kind: 'closed' };
   return { wk: cur, kind: 'first' };
 }
@@ -1108,7 +1111,7 @@ function recapHTML() {
   const sealed = final && under && w.budget > 0 && !empty;
   const seal = sealed ? `<circle class="seal" data-key="seal-${wk}" data-pct="1" cx="100" cy="100" r="98" fill="none" stroke="#3BCFBF" stroke-width="3.5" stroke-linecap="round"
       stroke-dasharray="${(2 * Math.PI * 98).toFixed(2)}" stroke-dashoffset="${(2 * Math.PI * 98).toFixed(2)}" transform="rotate(-90 100 100)"/>` : '';
-  const head = kind === 'first' ? 'Your first recap lands Sunday.' : empty ? 'Nothing logged that week.' : sealed ? 'You closed the week.' : 'A heavier week.';
+  const head = kind === 'first' ? `Your first recap lands ${now.getDay() === 0 ? 'next ' : ''}Sunday.` : empty ? 'Nothing logged that week.' : sealed ? 'You closed the week.' : 'A heavier week.';
   const sub = kind === 'first' ? `${money(w.spent, true)} spent so far` : empty ? 'Tap + as you spend and the ring tracks your week.' : sealed ? `${money(w.budget - w.spent)} under budget` : `That happens. Monday is a fresh start.`;
   const total = w.spent;
   // the student's categories, plus any removed one that still has spending this week
@@ -1135,7 +1138,7 @@ function recapHTML() {
           ${sealed ? [0, 45, 90, 135, 180, 225, 270, 315].map((a, i) => `<span class="spark" style="--a:${a}deg;background:${['#6474FF', '#3BCFBF', '#FF9FBD'][i % 3]}"></span>`).join('') : ''}
         </div>
         <div><h4>${head}</h4><span class="s-soft">${sub}</span>
-          ${kind === 'closing' ? '' : `<span class="recap-next">${kind === 'first' ? "It's ready Sunday at 6 pm, and you'll get a notification in the app when it is." : "Next recap: Sunday at 6 pm. You'll get a notification in the app when it's ready."}</span>`}
+          ${kind === 'closing' ? '' : `<span class="recap-next">${kind === 'first' ? `It's ready ${now.getDay() === 0 ? 'next ' : ''}Sunday at 6 pm, and you'll get a notification in the app when it is.` : "Next recap: Sunday at 6 pm. You'll get a notification in the app when it's ready."}</span>`}
           <div class="only-portrait-block" style="margin-top:.6em">${streakPill()}</div></div>
       </div>
       <div class="rcol">
