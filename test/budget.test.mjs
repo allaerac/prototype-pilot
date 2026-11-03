@@ -1,6 +1,6 @@
 // Run with: node app/test/budget.test.mjs
 import assert from 'node:assert/strict';
-import { computeWeekly, weekKey, budgetForWeek, closedWeeks, streak, daysLeftInWeek, suggestSplit, categoryLeft, goalWeekly, scaleSplit, goalProgress, projection, dateKey as B_dateKey } from '../js/budget.js';
+import { computeWeekly, weekKey, budgetForWeek, closedWeeks, streak, spentInWeek, daysLeftInWeek, suggestSplit, categoryLeft, goalWeekly, scaleSplit, goalProgress, projection, dateKey as B_dateKey } from '../js/budget.js';
 
 const t = (name, fn) => { fn(); console.log('ok -', name); };
 
@@ -148,4 +148,21 @@ t('first week is prorated, streak counts closed weeks', () => {
   assert.equal(streak(state, now), 1);
   state.tx.pop();                                      // nothing logged in the last week → streak resets
   assert.equal(streak(state, now), 0);
+});
+
+t('money in adds to that week and is never counted as spending', () => {
+  const state = {
+    setup: { startDate: '2026-10-19' },
+    budgetHistory: [{ from: '2026-10-19', weekly: 100 }],
+    tx: [
+      { amount: 80, cat: 'food', at: new Date(2026, 9, 20).toISOString() },
+      { amount: 30, kind: 'in', note: 'Refund', at: new Date(2026, 9, 21).toISOString() },
+      { amount: 50, kind: 'in', at: new Date(2026, 9, 28).toISOString() }      // only money in that week
+    ]
+  };
+  assert.equal(budgetForWeek(state, '2026-10-19'), 130);
+  assert.equal(spentInWeek(state.tx, '2026-10-19'), 80);
+  const weeks = closedWeeks(state, new Date(2026, 10, 3));
+  assert.deepEqual(weeks.map(w => [w.budget, w.spent, w.logged, w.under]), [[130, 80, 1, true], [150, 0, 0, true]]);
+  assert.equal(streak(state, new Date(2026, 10, 3)), 0);                   // a week with only money in doesn't count
 });

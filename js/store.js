@@ -23,7 +23,8 @@ function fresh() {
     alerts: {},               // { weekKey: { 75: true, 100: true } }
     stress: {},               // { weekKey: 1..5 } from before the daily slider
     stressDaily: {},          // { dateKey: 0..100 } money stress slider, once a day
-    surveys: {},              // { id: { at, answers } }
+    surveys: {},              // { id: { at, answers, activeDays } }; check-ins are checkin-1, checkin-2, …
+    activeDays: [],           // dateKeys of the days the app was opened (for the every-5-days check-in)
     reported: {},             // { weekKey: true } once week_closed was sent
     prefs: { show21: false }
   };

@@ -388,6 +388,12 @@ textarea.field { resize: none; min-height: 5em; font: inherit; }
 .set-row > div { display: grid; gap: .15em; min-width: 0; }
 .set-row small { color: var(--screen-soft); font-size: max(.82em, 11px); }
 
+/* Log sheet: Spent / Money in */
+.kind-chips { justify-content: center; }
+.kind-chips .chip { min-width: 7.5em; text-align: center; }
+.kind-help { text-align: center; font-size: max(.85em, 12px); }
+.amount.in, .tx-amt.in { color: var(--mint); }
+
 /* ---------- Setup ---------- */
 .v-setup { align-items: center; }
 .app[data-mode="setup"] { font-size: clamp(15px, 1.25vw, 20px); }

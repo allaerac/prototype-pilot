@@ -1,11 +1,11 @@
 // Prototype pilot app: setup, Home (ring + quick-log), Deals, Recap, sheets and limit alerts.
 // Rendering is plain template strings. State lives in store.js; pilot events go through track.js.
-import * as store from './store.js?v=46';
-import { track, flush, groupOn, dropGroup, tagQueue } from './track.js?v=46';
-import * as account from './account.js?v=46';
-import * as B from './budget.js?v=46';
-import { APP_VERSION } from './config.js?v=46';
-import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING as ALL_TRACKING, DEALS, QUOTES, SHOW_DEALS } from './content.js?v=46';
+import * as store from './store.js?v=47';
+import { track, flush, groupOn, dropGroup, tagQueue } from './track.js?v=47';
+import * as account from './account.js?v=47';
+import * as B from './budget.js?v=47';
+import { APP_VERSION } from './config.js?v=47';
+import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING as ALL_TRACKING, DEALS, QUOTES, SHOW_DEALS } from './content.js?v=47';
 // What we collect, minus the deals group while deals are switched off (content.js SHOW_DEALS)
 const TRACKING = ALL_TRACKING.filter(g => g.id !== 'deals' || SHOW_DEALS);
 if (!SHOW_DEALS) document.querySelectorAll('[data-tab="deals"]').forEach(b => b.remove());
@@ -173,9 +173,9 @@ function weekStats(wk) {
   const s = S();
   const budget = B.budgetForWeek(s, wk);
   const items = s.tx.filter(x => B.weekKey(new Date(x.at)) === wk);
-  const spent = items.reduce((t, x) => t + x.amount, 0);
+  const spent = items.reduce((t, x) => (B.isIn(x) ? t : t + x.amount), 0);
   const spentBy = {};
-  items.forEach(x => { spentBy[x.cat] = (spentBy[x.cat] || 0) + x.amount; });
+  items.forEach(x => { if (!B.isIn(x)) spentBy[x.cat] = (spentBy[x.cat] || 0) + x.amount; });
   return { wk, budget, spent, left: budget - spent, pct: budget > 0 ? spent / budget : (spent > 0 ? 1 : 0), items, spentBy };
 }
 // Days the current week has for this student (the setup week is shorter).
@@ -194,7 +194,7 @@ function reportWeeks() {
   weeks.forEach(w => {
     if (s.reported[w.wk]) return;
     const g = goal && goal.weeks.find(x => x.wk === w.wk);
-    track('week_closed', { week: w.wk, budget: w.budget, spent: Math.round(w.spent * 100) / 100, under: w.under, logged: s.tx.filter(x => B.weekKey(new Date(x.at)) === w.wk).length, ...(g ? { goal_saved: g.saved } : {}) });
+    track('week_closed', { week: w.wk, budget: w.budget, spent: Math.round(w.spent * 100) / 100, under: w.under, logged: s.tx.filter(x => !B.isIn(x) && B.weekKey(new Date(x.at)) === w.wk).length, added: B.addedInWeek(s.tx, w.wk), ...(g ? { goal_saved: g.saved } : {}) });
     s.reported[w.wk] = true;
     changed = true;
   });
@@ -833,6 +833,8 @@ function vhead(eyebrow, title, right) {
 }
 // The line at the bottom of every tab: where to send feedback or look for answers.
 const feedbackNote = () => `<button class="view-note" data-sheet="settings">Questions or ideas? <b>Settings</b> → <b>Send feedback</b></button>`;
+// On Home, the same line turns into the check-in while one is waiting.
+const homeNote = () => dueSurvey() ? `<button class="view-note" data-sheet="survey">Got 30 seconds? <b>${dueSurvey() === 'final' ? 'Last check-in' : 'Quick check-in'}</b> →</button>` : feedbackNote();
 function streakLabel() {
   const n = B.streak(S(), store.now());
   const closed = B.closedWeeks(S(), store.now()).length;
@@ -904,7 +906,7 @@ function homeHTML() {
         </div>
       </div>
     </div>
-    ${feedbackNote()}
+    ${homeNote()}
   </section>`;
 }
 let stressEdit = false;   // "Change" on the one-line stress card opens the slider again
@@ -973,12 +975,15 @@ function easeMessage() {
   return `You've still got ${money(Math.max(0, w.left))} this week, and sticking to ${money(setup.weekly)} a week gets you all the way to ${endText}.`;
 }
 
+// Money coming in shows as its own kind of entry
+const MONEY_IN = { id: 'in', name: 'Money in', color: '#3BCFBF' };
+const entryCat = x => (B.isIn(x) ? MONEY_IN : catOf(x.cat));
 function txRow(x) {
-  const c = catOf(x.cat);
+  const c = entryCat(x);
   return `<button class="tx" data-tx="${x.id}">
     <span class="tx-icon"><i style="background:${c.color}"></i></span>
     <span class="tx-main"><span>${esc(x.note || c.name)}</span><span>${x.note ? esc(c.name) + ' &middot; ' : ''}${when(x.at)}</span></span>
-    <span class="tx-amt">−${money(x.amount, true)}</span>
+    <span class="tx-amt${B.isIn(x) ? ' in' : ''}">${B.isIn(x) ? '+' : '−'}${money(x.amount, true)}</span>
   </button>`;
 }
 
@@ -1055,12 +1060,32 @@ function checkRecapReady() {
   showToast('Your recap is ready', r.kind === 'closing' ? 'See how this week went and close it out.' : 'See how last week went.', 'recap');
   track('recap_ready_shown', { week: r.wk, kind: r.kind });
 }
+// Surveys: a quick check-in after every 5 days the student has used the app (5th, 10th, 15th… day they
+// opened it), and the final survey from day 27 of the pilot. A missed check-in doesn't pile up: the next
+// one comes 5 days of use after the last one they answered.
+const usedDays = () => (S().activeDays || []).length;
 function dueSurvey() {
   const s = S();
-  const d = daysSinceStart();
-  if (d >= 27 && !s.surveys.final) return 'final';
-  if (d >= 13 && !s.surveys.midpoint && !s.surveys.final) return 'midpoint';
-  return null;
+  if (daysSinceStart() >= 27 && !s.surveys.final) return 'final';
+  const last = Math.max(0, ...Object.values(s.surveys).map(v => v.activeDays || 0));
+  return usedDays() >= 5 && usedDays() - last >= 5 ? 'checkin' : null;
+}
+// Counts today as a day of use (once per day).
+function markActiveDay() {
+  const s = S();
+  if (!s.setup) return;
+  const today = B.dateKey(store.now());
+  if ((s.activeDays || []).includes(today)) return;
+  store.update(st => { st.activeDays = [...(st.activeDays || []), today]; });
+}
+// When a survey is due: a notification once a day when the app opens (unless the recap one is showing).
+function checkSurveyDue() {
+  if (mode !== 'app' || sheet) return;
+  const due = dueSurvey(), today = B.dateKey(store.now());
+  if (!due || S().surveyPrompted === today || toastEl.classList.contains('on')) return;
+  store.update(st => { st.surveyPrompted = today; });
+  showToast(due === 'final' ? 'One last check-in' : 'Quick check-in', due === 'final' ? 'The pilot is wrapping up. 30 seconds to tell us how it went?' : 'Got 30 seconds? Tell us how the app is going.', 'survey');
+  track('survey_prompt_shown', { survey: due, active_days: usedDays() });
 }
 // Recap's "Where your money's headed": money left to spend this semester if they stick to the plan (dashed)
 // vs at the pace they're actually spending (solid), from today to the semester end, plus one plain sentence.
@@ -1179,6 +1204,7 @@ function renderApp(animate) {
 }
 
 function enterApp(t) {
+  markActiveDay();
   mode = 'app';
   app.dataset.mode = 'app';
   go(t || 'home', true);
@@ -1211,13 +1237,13 @@ function openSheet(name, arg) {
   if (name === 'log') {
     const last = S().tx[S().tx.length - 1];
     const active = activeCats();
-    logDraft = { amount: '', cat: last && active.some(c => c.id === last.cat) ? last.cat : active[0].id, note: '', day: 'today' };
+    logDraft = { kind: 'out', amount: '', cat: last && active.some(c => c.id === last.cat) ? last.cat : active[0].id, note: '', day: 'today' };
     track('log_open', {});
   }
   if (name === 'tx') { txOpen = arg; confirmDel = false; }
   if (name === 'deal') { txOpen = arg; const d = DEALS.find(x => x.id === arg); track('deal_open', { deal: arg, cat: d && d.cat }); }
   if (name === 'settings') confirmReset = false;
-  if (name === 'survey') { surveyDraft = { id: dueSurvey() || 'final' }; track('survey_open', { survey: surveyDraft.id }); }
+  if (name === 'survey') { surveyDraft = { id: dueSurvey() || 'checkin' }; track('survey_open', { survey: surveyDraft.id, active_days: usedDays() }); }
   if (name === 'feedback') surveyDraft = { text: '' };
   renderSheet();
   scrimEl.classList.add('on');
@@ -1253,32 +1279,35 @@ function renderSheet() {
   let html = '';
   if (sheet === 'log') {
     const valid = Number(logDraft.amount) > 0;
-    html = `${sheetHead('Log a purchase')}
-      <div class="amount" aria-live="polite"><small>$</small>${amountText(logDraft.amount)}</div>
-      <div class="chips" style="justify-content:center">${activeCats().map(c => `<button class="chip${logDraft.cat === c.id ? ' sel' : ''}" data-cat="${c.id}">${esc(c.name)}</button>`).join('')}</div>
+    html = `${sheetHead(logDraft.kind === 'in' ? 'Log money in' : 'Log a purchase')}
+      <div class="chips kind-chips" role="radiogroup" aria-label="Spent or money in">${[['out', 'Spent'], ['in', 'Money in']].map(([k, label]) => `<button class="chip${logDraft.kind === k ? ' sel' : ''}" role="radio" aria-checked="${logDraft.kind === k}" data-kind="${k}">${label}</button>`).join('')}</div>
+      <div class="amount${logDraft.kind === 'in' ? ' in' : ''}" aria-live="polite"><small>${logDraft.kind === 'in' ? '+' : ''}$</small>${amountText(logDraft.amount)}</div>
+      ${logDraft.kind === 'in'
+        ? `<p class="s-soft kind-help">Adds to what you can spend this week. For money that comes every week, change Money coming in in Settings.</p>`
+        : `<div class="chips" style="justify-content:center">${activeCats().map(c => `<button class="chip${logDraft.cat === c.id ? ' sel' : ''}" data-cat="${c.id}">${esc(c.name)}</button>`).join('')}</div>`}
       <div class="row">
-        <input class="field" data-note maxlength="40" placeholder="Where? (optional)" value="${esc(logDraft.note)}" autocomplete="off">
+        <input class="field" data-note maxlength="40" placeholder="${logDraft.kind === 'in' ? 'From? (optional)' : 'Where? (optional)'}" value="${esc(logDraft.note)}" autocomplete="off">
         <span class="chips" style="flex-wrap:nowrap">${['today', 'yesterday'].map(d => `<button class="chip${logDraft.day === d ? ' sel' : ''}" data-day="${d}">${d === 'today' ? 'Today' : 'Yesterday'}</button>`).join('')}</span>
       </div>
       <div class="keypad">${['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', 'del'].map(k => `<button data-key="${k}" aria-label="${k === 'del' ? 'Delete' : k}">${k === 'del' ? backspace : k}</button>`).join('')}</div>
-      <button class="cta" data-save-tx ${valid ? '' : 'disabled'}>${valid ? 'Add ' + money(Number(logDraft.amount), true) : 'Enter an amount'}</button>`;
+      <button class="cta" data-save-tx ${valid ? '' : 'disabled'}>${valid ? (logDraft.kind === 'in' ? 'Add +' : 'Add ') + money(Number(logDraft.amount), true) : 'Enter an amount'}</button>`;
   } else if (sheet === 'purchases') {
     const groups = {};
     s.tx.slice().sort((a, b) => (a.at < b.at ? 1 : -1)).forEach(x => { (groups[B.weekKey(new Date(x.at))] ||= []).push(x); });
     const cur = B.weekKey(store.now());
     html = `${sheetHead('All purchases')}
       <div class="sheet-body scrolls">${Object.keys(groups).length ? Object.keys(groups).map(wk => `
-        <span class="s-mono group-label">${wk === cur ? 'This week' : 'Week of ' + weekRange(wk)} &middot; ${money(groups[wk].reduce((t, x) => t + x.amount, 0), true)}</span>
+        <span class="s-mono group-label">${wk === cur ? 'This week' : 'Week of ' + weekRange(wk)} &middot; ${money(groups[wk].reduce((t, x) => (B.isIn(x) ? t : t + x.amount), 0), true)} spent${B.addedInWeek(groups[wk], wk) > 0 ? ` &middot; +${money(B.addedInWeek(groups[wk], wk), true)} in` : ''}</span>
         <div>${groups[wk].map(txRow).join('')}</div>`).join('') : '<p class="s-soft">Nothing logged yet.</p>'}</div>`;
   } else if (sheet === 'tx') {
     const x = s.tx.find(t => t.id === txOpen);
     if (!x) { closeSheet(); return; }
-    const c = catOf(x.cat);
+    const c = entryCat(x);
     const d = new Date(x.at);
     html = `${sheetHead(esc(x.note || c.name))}
-      <div class="amount"><small>$</small>${amountText(x.amount.toFixed(2))}</div>
+      <div class="amount${B.isIn(x) ? ' in' : ''}"><small>${B.isIn(x) ? '+' : ''}$</small>${amountText(x.amount.toFixed(2))}</div>
       <p class="s-soft" style="text-align:center">${esc(c.name)} &middot; ${DAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}</p>
-      <button class="cta ghost danger" data-del-tx>${confirmDel ? 'Tap again to remove' : 'Remove this purchase'}</button>`;
+      <button class="cta ghost danger" data-del-tx>${confirmDel ? 'Tap again to remove' : B.isIn(x) ? 'Remove this' : 'Remove this purchase'}</button>`;
   } else if (sheet === 'deal') {
     const d = DEALS.find(t => t.id === txOpen);
     if (!d) { closeSheet(); return; }
@@ -1382,13 +1411,18 @@ function saveTx() {
   const at = logDraft.day === 'yesterday' ? new Date(B.addDays(B.startOfDay(now), -1).getTime() + 12 * 3600e3) : now;
   const wk = B.weekKey(at);
   const before = weekStats(wk);
-  const x = { id: store.newId(), amount, cat: logDraft.cat, note: logDraft.note.trim(), at: at.toISOString() };
+  const isIn = logDraft.kind === 'in';
+  const x = isIn
+    ? { id: store.newId(), amount, kind: 'in', note: logDraft.note.trim(), at: at.toISOString() }
+    : { id: store.newId(), amount, cat: logDraft.cat, note: logDraft.note.trim(), at: at.toISOString() };
   store.update(s => { s.tx.push(x); });
   const after = weekStats(wk);
-  track('tx_add', { amount, cat: x.cat, day: logDraft.day, has_note: !!x.note, week: wk, pct_after: Math.round(after.pct * 100) / 100 });
+  if (isIn) track('money_in', { amount, day: logDraft.day, has_note: !!x.note, week: wk });
+  else track('tx_add', { amount, cat: x.cat, day: logDraft.day, has_note: !!x.note, week: wk, pct_after: Math.round(after.pct * 100) / 100 });
   closeSheet();
   if (mode === 'app') { if (tab !== 'home') go('home'); else renderApp(false); }
-  if (wk === B.weekKey(now)) checkAlerts(before, after);
+  if (isIn) showToast(`Added ${money(amount, true)}`, `You've got ${money(Math.max(0, after.left))} left ${wk === B.weekKey(now) ? 'this week' : 'that week'}.`);
+  else if (wk === B.weekKey(now)) checkAlerts(before, after);
 }
 
 // Gentle limit alerts at 75% and 100%. Each one fires once per week.
@@ -1423,7 +1457,7 @@ function showToast(title, body, goTo) {
     </div>
     <b>${esc(title)}</b>
     <p>${esc(body)}</p>
-    ${goTo ? `<button class="link toast-go" data-toast-go="${goTo}">See it &rarr;</button>` : ''}`;
+    ${goTo ? `<button class="link toast-go" data-toast-go="${goTo}">${goTo === 'survey' ? 'Start' : 'See it'} &rarr;</button>` : ''}`;
   toastEl.classList.add('on');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toastEl.classList.remove('on'), 9000);
@@ -1437,7 +1471,7 @@ app.addEventListener('click', e => {
   const s = S();
 
   if ('dismiss' in d) { toastEl.classList.remove('on'); return; }
-  if (d.toastGo) { toastEl.classList.remove('on'); closeSheet(); go(d.toastGo); return; }
+  if (d.toastGo) { toastEl.classList.remove('on'); closeSheet(); if (d.toastGo === 'survey') openSheet('survey'); else go(d.toastGo); return; }
   if ('close' in d) { closeSheet(); return; }
 
   // setup
@@ -1511,13 +1545,14 @@ app.addEventListener('click', e => {
   // log sheet
   if (d.key) { keypad(d.key); return; }
   if (d.cat) { logDraft.cat = d.cat; renderSheet(); return; }
+  if (d.kind && sheet === 'log') { logDraft.kind = d.kind; renderSheet(); return; }
   if (d.day) { logDraft.day = d.day; renderSheet(); return; }
   if ('saveTx' in d) { saveTx(); return; }
   if ('delTx' in d) {
     if (!confirmDel) { confirmDel = true; renderSheet(); return; }
     const x = s.tx.find(t2 => t2.id === txOpen);
     store.update(st => { st.tx = st.tx.filter(t2 => t2.id !== txOpen); });
-    if (x) track('tx_delete', { amount: x.amount, cat: x.cat, age_days: B.daysBetween(new Date(x.at), store.now()) });
+    if (x) track('tx_delete', { amount: x.amount, cat: x.cat, ...(B.isIn(x) ? { kind: 'in' } : {}), age_days: B.daysBetween(new Date(x.at), store.now()) });
     closeSheet();
     renderApp(false);
     return;
@@ -1567,8 +1602,10 @@ app.addEventListener('click', e => {
   if ('svSubmit' in d) {
     const id = surveyDraft.id;
     const ans = { satisfaction: surveyDraft.satisfaction, keep: surveyDraft.keep, pay: surveyDraft.pay, text: (surveyDraft.text || '').trim().slice(0, 600) };
-    store.update(st => { st.surveys[id] = { at: new Date().toISOString(), answers: ans }; });
-    track('survey_response', { survey: id, ...ans });
+    // check-ins are numbered (checkin-1, checkin-2, …) so each one is kept
+    const n = id === 'checkin' ? Object.keys(S().surveys).filter(k => k.startsWith('checkin-')).length + 1 : null;
+    store.update(st => { st.surveys[n ? `checkin-${n}` : id] = { at: new Date().toISOString(), answers: ans, activeDays: usedDays() }; });
+    track('survey_response', { survey: id, ...(n ? { n } : {}), active_days: usedDays(), ...ans });
     closeSheet();
     renderApp(false);
     showToast('Thank you!', 'That really helps the team.');
@@ -1672,14 +1709,17 @@ function refreshIfNewDay() {
   const today = B.dateKey(store.now());
   if (today === lastDay) return;
   lastDay = today;
+  markActiveDay();
   reportWeeks();
   if (mode === 'app' && !sheet) renderApp(false);
 }
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   track('app_open', { standalone: isStandalone(), resumed: true, days_since_start: daysSinceStart() });
+  markActiveDay();
   refreshIfNewDay();
   checkRecapReady();
+  checkSurveyDue();
 });
 setInterval(() => { refreshIfNewDay(); checkRecapReady(); }, 60000);
 addEventListener('resize', () => fitAll());
@@ -1701,7 +1741,7 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
   if (s.setup) {
     track('app_open', { standalone: isStandalone(), resumed: false, days_since_start: daysSinceStart() });
     reportWeeks();
-    if (s.username) { enterApp('home'); account.backupSoon(); setTimeout(checkRecapReady, 900); }
+    if (s.username) { enterApp('home'); account.backupSoon(); setTimeout(() => { checkRecapReady(); checkSurveyDue(); }, 900); }
     else startSetup(false, null, true);   // set up before usernames existed: pick one, then straight to Home
   } else {
     startSetup(false);

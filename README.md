@@ -63,11 +63,12 @@ Every event has a random ID per phone (`anon_id`), the student's `username` once
 | `screen_view` | Tab change | screen |
 | `recap_ready_shown` | The in-app "Your recap is ready" banner, once per week (Sunday 6 pm or the next open) | week, kind |
 | `log_open`, `tx_add`, `tx_delete` | Logging | amount, category, today/yesterday, % of week used |
+| `money_in` | Logging money coming in (the log sheet's **Money in** side: a refund, cash from a friend, an extra shift). It adds to that week's budget and is never counted as spending | amount, today/yesterday, has_note, week |
 | `alert_shown` | 75% / 100% alert | threshold |
-| `week_closed` | Once per finished week | budget, spent, under, purchases logged, goal_saved (what landed in the goal) |
+| `week_closed` | Once per finished week | budget (including any money in), spent, under, purchases logged, added (money in that week), goal_saved (what landed in the goal) |
 | `stress_checkin` | Old 1–5 recap question (replaced by `stress_daily`) | week, score |
 | `deal_open`, `deal_source`, `deals_21_toggle` | Deals | deal id |
-| `survey_response` | Day 14 and day 28 check-ins | satisfaction, keep using, would pay, comments |
+| `survey_prompt_shown`, `survey_open`, `survey_response` | A **quick check-in after every 5 days the student uses the app** (5th, 10th, 15th… day they open it; a skipped one doesn't pile up), and the **final survey from day 27**. Shown as a notification when the app opens, on Home's bottom line, and on Recap | survey (`checkin` or `final`), n (which check-in), active_days, satisfaction 1–5, comments; the final also asks keep using and would pay |
 | `feedback` | Settings → Send feedback | text |
 | `sharing_off`, `sharing_on`, `reset` | Settings | none |
 | `share_pref` | Settings → What we collect | group, on |
@@ -143,6 +144,10 @@ select date_trunc('week', at) as week,
        count(distinct student) filter (where name = 'screen_view' and props->>'screen' = 'deals') as opened_deals,
        count(distinct student) as active
 from student_events group by 1 order by 1;
+
+-- Satisfaction over time: each check-in (every 5 days of use) and the final survey
+select coalesce((props->>'n')::int, 99) as checkin, props->>'survey' as survey, round(avg((props->>'satisfaction')::int), 2) as satisfaction, count(*) as answers
+from student_events where name = 'survey_response' group by 1, 2 order by 1;
 
 -- Satisfaction and willingness to pay
 select props->>'survey' as survey, round(avg((props->>'satisfaction')::int), 2) as satisfaction, count(*)

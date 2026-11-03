@@ -152,8 +152,9 @@ function weekShare(state, wk) {
   if (startKey && wk === weekKey(parseKey(startKey))) return (7 - ((parseKey(startKey).getDay() + 6) % 7)) / 7;
   return 1;
 }
+// Plus any money the student logged as coming in that week (a refund, cash from a friend, an extra shift).
 export function budgetForWeek(state, wk) {
-  return Math.round(weeklyFor(state.budgetHistory || [], wk) * weekShare(state, wk));
+  return Math.round(weeklyFor(state.budgetHistory || [], wk) * weekShare(state, wk)) + addedInWeek(state.tx || [], wk);
 }
 // Dollars set aside for the goal that week (budgetHistory entries carry `save` once a goal is set).
 export function saveForWeek(state, wk) {
@@ -223,8 +224,13 @@ export function projection(state, now) {
   return { weeks, plan, pace, start, endLeft, runOut, points };
 }
 
+// Entries are purchases, or money coming in (kind: 'in'), which adds to that week instead of using it up.
+export const isIn = x => x.kind === 'in';
 export function spentInWeek(tx, wk) {
-  return tx.reduce((t, x) => (weekKey(new Date(x.at)) === wk ? t + x.amount : t), 0);
+  return tx.reduce((t, x) => (!isIn(x) && weekKey(new Date(x.at)) === wk ? t + x.amount : t), 0);
+}
+export function addedInWeek(tx, wk) {
+  return Math.round(tx.reduce((t, x) => (isIn(x) && weekKey(new Date(x.at)) === wk ? t + x.amount : t), 0) * 100) / 100;
 }
 
 // Every finished week from the setup week up to (not including) the current one.
@@ -237,7 +243,7 @@ export function closedWeeks(state, now) {
     const wk = dateKey(w);
     const budget = budgetForWeek(state, wk);
     const spent = spentInWeek(state.tx || [], wk);
-    const logged = (state.tx || []).filter(x => weekKey(new Date(x.at)) === wk).length;
+    const logged = (state.tx || []).filter(x => !isIn(x) && weekKey(new Date(x.at)) === wk).length;
     out.push({ wk, budget, spent, logged, under: spent <= budget + 0.005 });
     w = addDays(w, 7);
   }

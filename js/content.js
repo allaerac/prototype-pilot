@@ -63,7 +63,7 @@ export const TRACKING = [
     id: 'purchases', name: 'Purchases you log',
     what: 'The amount, category and day of each purchase you add or remove. Never where you bought it or what you typed in the note.',
     why: "This is the big one. It shows us if logging is quick enough that people actually keep doing it, and which categories go over the most so we know what to focus on.",
-    events: ['log_open', 'tx_add', 'tx_delete']
+    events: ['log_open', 'tx_add', 'tx_delete', 'money_in']
   },
   {
     id: 'weeks', name: 'How your weeks go',
