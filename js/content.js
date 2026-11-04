@@ -67,9 +67,9 @@ export const TRACKING = [
   },
   {
     id: 'weeks', name: 'How your weeks go',
-    what: 'If you stayed under your number each week, and when the 75% and 100% alerts popped up.',
+    what: "If you stayed under your number each week, each Monday's new number, how close our balance guess was (never the balance itself), and when the 75% and 100% alerts popped up.",
     why: "The whole point is helping you stay on track week to week, so this is how we tell if the app is actually working or not.",
-    events: ['week_closed', 'alert_shown']
+    events: ['week_closed', 'alert_shown', 'week_planned', 'balance_check_shown', 'balance_check']
   },
   {
     id: 'stress', name: 'Money stress check-ins',

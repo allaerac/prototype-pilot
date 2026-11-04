@@ -185,6 +185,11 @@ button { background: none; border: 0; cursor: pointer; padding: 0; }
 /* the big ring takes whatever height the card has left (up to 31em), as a square */
 .hero { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.2em; }
 .hero-top { position: absolute; top: 1.2em; left: 1.2em; z-index: 1; }
+/* the balance we assume, next to the pace line: tap it to fix it */
+.hero-foot { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: .5em; }
+.bal-chip { display: inline-flex; align-items: center; gap: .4em; font-size: max(.95em, 11px); padding: .5em .95em; border-radius: 999px; background: var(--frost); border: 1px solid var(--screen-line); color: var(--screen-soft); white-space: nowrap; }
+.bal-chip b { color: var(--screen-ink); font-weight: 500; font-variant-numeric: tabular-nums; }
+.math-note { margin-top: .9em; font-size: max(.85em, 11px); }
 /* as big as the card allows, but never taller than the window has room for */
 .big-ring { position: relative; flex: 1 1 0; min-height: 4.5em; max-height: 31em; width: auto; max-width: 100%; aspect-ratio: 1; }
 .big-ring svg { width: 100%; height: 100%; display: block; }
@@ -596,15 +601,21 @@ textarea.field { resize: none; min-height: 5em; font: inherit; }
   .only-portrait-block { display: block; }
   .hero { gap: .7em; }
   .hero-top { display: none; }
-  .big-ring { max-height: 12em; }
+  .big-ring { max-height: 12em; min-height: 8.6em; }
+  .big-ring .ring-center > .s-mono { display: none; }   /* "left of $135" under the number says it */
   .ring-num { font-size: 3.4em; }
-  .pace { font-size: max(.82em, 11px); }
+  .pace, .bal-chip { font-size: max(.82em, 11px); }
   .cats { gap: .4em; grid-template-columns: repeat(var(--np, 4), minmax(0, 1fr)); }
   .cat { gap: .25em; }
   .cat-ring { width: 3.4em; }
   .cat-ring span { font-size: max(.68em, 11px); }
   .cat b { font-size: max(.72em, 11px); text-wrap: balance; }
   .cat em { font-size: max(.72em, 11px); line-height: 1; }
+  /* on phones "Logged this week" is one line (See all opens the list), so the ring gets the room */
+  .grid2 { grid-template-rows: minmax(min-content, 1fr) auto; }
+  .col > .fill.logged { flex: none; min-height: 0; padding-top: .8em; padding-bottom: .8em; }
+  .logged .card-head { margin-bottom: 0; }
+  .logged .list, .logged .empty { display: none; }
   .tx { padding: .4em 0; gap: .7em; }
   .tx-icon { width: 1.9em; height: 1.9em; }
   .tabbar button { padding: 0 .95em; gap: .4em; font-size: max(.92em, 11px); }
@@ -657,8 +668,8 @@ textarea.field { resize: none; min-height: 5em; font: inherit; }
   .result .big { font-size: 3.8em; }
   .stress-card .scale-ends { display: none; }
 }
-/* Short phones: Home's ring sits beside its pace line, and the category rings get smaller */
-@media (max-aspect-ratio: 1/1) and (max-height: 700px) {
+/* Very short phones (iPhone SE in Safari): Home's ring sits beside its pace line, and the category rings get smaller */
+@media (max-aspect-ratio: 1/1) and (max-height: 600px) {
   .hero { flex-direction: row; gap: 1em; padding-top: .8em; padding-bottom: .8em; }
   .hero .big-ring { flex: none; width: 5.6em; height: 5.6em; min-height: 0; max-height: none; }
   .hero .ring-num { font-size: 1.6em; }

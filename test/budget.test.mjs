@@ -1,6 +1,6 @@
 // Run with: node app/test/budget.test.mjs
 import assert from 'node:assert/strict';
-import { computeWeekly, weekKey, budgetForWeek, closedWeeks, streak, spentInWeek, daysLeftInWeek, suggestSplit, categoryLeft, goalWeekly, scaleSplit, goalProgress, projection, dateKey as B_dateKey } from '../js/budget.js';
+import { computeWeekly, heldFor, assumedBalance, planWeeks, replanNow, weekShare, weekKey, budgetForWeek, closedWeeks, streak, spentInWeek, daysLeftInWeek, suggestSplit, categoryLeft, goalWeekly, scaleSplit, goalProgress, projection, dateKey as B_dateKey } from '../js/budget.js';
 
 const t = (name, fn) => { fn(); console.log('ok -', name); };
 
@@ -15,32 +15,85 @@ t('Jordan, cushion on = $125', () => {
   const r = computeWeekly({ sources: [{ type: 'family', amount: 2240, freq: 'once' }], semesterEnd: end, cushion: true }, mon);
   assert.equal(r.weekly, 125);
 });
-t('recurring + bills', () => {
-  // $600/mo from family ≈ $138.46/wk, $400 every 2 weeks = $200/wk, $50/mo phone ≈ $11.54/wk → 326.9 → 325
+t('money is only budgeted once it lands', () => {
+  // $300 now (cushion $30) has to last until Sep 1, when the first $600 from family lands: 270 ÷ 8 days → $235/wk
   const r = computeWeekly({
+    onHand: 300,
     sources: [{ type: 'family', amount: 600, freq: 'monthly' }, { type: 'job', amount: 400, freq: 'biweekly' }],
     bills: [{ type: 'phone', amount: 50 }], semesterEnd: end, cushion: true
   }, mon);
-  assert.equal(r.weekly, 325);
+  assert.equal(r.weekly, 235);
+  assert.equal(r.until, '2026-08-31');
+  assert.deepEqual(r.next, { date: '2026-09-01', amount: 600 });
+  // $0 now: nothing to spend until the first paycheck
+  const zero = computeWeekly({ sources: [{ type: 'job', amount: 1000, freq: 'weekly' }], bills: [{ type: 'rent', amount: 650, freq: 'monthly' }], semesterEnd: end }, mon);
+  assert.equal(zero.weekly, 0);
+  assert.equal(zero.until, '2026-08-30');
 });
 t('money on hand joins the pot, several jobs add up', () => {
-  // $1,600 now + $640 refund = $2,240 → $140/wk with no cushion; two jobs: $100/wk + $200 every 2 weeks = $200/wk → $340
+  // $1,600 now + $640 refund = $2,240, plus 15 weekly $100s and 7 biweekly $200s before Dec 13 = $5,140 over 16 weeks
   const r = computeWeekly({
     onHand: 1600,
     sources: [{ type: 'loans', amount: 640, freq: 'once' }, { type: 'job', amount: 100, freq: 'weekly' }, { type: 'job', amount: 200, freq: 'biweekly' }],
     semesterEnd: end, cushion: false
   }, mon);
   assert.equal(r.pot, 2240);
-  assert.equal(r.weekly, 340);
+  assert.equal(r.total, 5140);
+  assert.equal(r.weekly, 320);
+  assert.equal(r.until, end);
 });
-t('bills have their own frequency', () => {
-  // $1,000/wk coming in − $650/mo rent (150/wk) − $20/wk other → 830
-  const r = computeWeekly({
-    sources: [{ type: 'job', amount: 1000, freq: 'weekly' }],
-    bills: [{ type: 'rent', amount: 650, freq: 'monthly' }, { type: 'other', amount: 20, freq: 'weekly' }],
-    semesterEnd: end
-  }, mon);
-  assert.equal(r.weekly, 830);
+t('$185 now and $500 a month: $40 until Dec 1, then more', () => {
+  const wed = new Date(2026, 10, 4, 18);
+  const r = computeWeekly({ onHand: 185, sources: [{ type: 'family', amount: 500, freq: 'monthly' }], semesterEnd: '2026-12-11' }, wed);
+  assert.equal(r.held, 18.5);
+  assert.equal(r.weekly, 40);                                     // 166.50 ÷ 27 days × 7
+  assert.equal(r.until, '2026-11-30');
+  const order = ['food', 'fun'];
+  const state = {
+    setup: { onHand: 185, sources: [{ type: 'family', amount: 500, freq: 'monthly' }], bills: [], semesterEnd: '2026-12-11', cushion: true, held: 18.5, startDate: '2026-11-04', completedAt: wed.toISOString(), order, cats: { food: 20, fun: 20 } },
+    budgetHistory: [{ from: '2026-11-02', weekly: 40, gross: 40, save: 0, order, cats: { food: 20, fun: 20 } }],
+    tx: [{ amount: 20, cat: 'food', at: new Date(2026, 10, 5, 12).toISOString() }, { amount: 30, kind: 'in', at: new Date(2026, 10, 6, 12).toISOString() }]
+  };
+  // the next Monday: $185 − $20 + $30 = $195 assumed; (195 − 18.50) ÷ 22 days × 7 = 56 → $55
+  const mon9 = new Date(2026, 10, 9, 8);
+  assert.equal(assumedBalance(state, mon9).amount, 195);
+  const weeks = planWeeks(state, mon9);
+  assert.deepEqual(weeks.map(e => [e.from, e.weekly]), [['2026-11-09', 55]]);
+  assert.equal(weeks[0].cats.food + weeks[0].cats.fun, 55);
+  // the $500 is assumed to land Dec 1
+  assert.equal(assumedBalance(state, new Date(2026, 10, 30, 9)).amount, 195);
+  assert.equal(assumedBalance(state, new Date(2026, 11, 1, 9)).amount, 695);
+  // planning through to the week of Nov 30 never re-plans a week twice, and the Dec 1 money makes it the big one
+  const all = planWeeks(state, new Date(2026, 10, 30, 9));
+  assert.deepEqual(all.map(e => e.from), ['2026-11-09', '2026-11-16', '2026-11-23', '2026-11-30']);
+  assert.ok(all[3].weekly > all[2].weekly * 2);
+});
+t('Update my balance re-plans the rest of this week', () => {
+  const wed = new Date(2026, 10, 11, 20);
+  const order = ['food'];
+  const state = {
+    setup: { onHand: 185, sources: [{ type: 'family', amount: 500, freq: 'monthly' }], bills: [], semesterEnd: '2026-12-11', cushion: true, held: 18.5, startDate: '2026-11-02', completedAt: new Date(2026, 10, 2, 9).toISOString(), order, cats: { food: 40 } },
+    budgetHistory: [{ from: '2026-11-02', weekly: 40, gross: 40, save: 0, order, cats: { food: 40 } }, { from: '2026-11-09', weekly: 45, gross: 45, save: 0, order, cats: { food: 45 } }],
+    tx: [{ amount: 15, cat: 'food', at: new Date(2026, 10, 10, 12).toISOString() }],
+    balance: { at: wed.toISOString(), amount: 100 }
+  };
+  assert.equal(assumedBalance(state, wed).amount, 100);
+  const { entry, weekly } = replanNow(state, wed);
+  assert.equal(weekly, 25);                                       // (100 − 18.50) ÷ 20 days × 7 = 28.5 → $25
+  assert.equal(entry.weekly, 33);                                 // $15 already spent + $25 × 5/7 for Wed–Sun
+  // money assumed to land after the update still lands ($100 + $500 on Dec 1)
+  assert.equal(assumedBalance({ ...state, tx: [] }, new Date(2026, 11, 2)).amount, 600);
+});
+t('the cushion is 10% of what they started with', () => {
+  assert.equal(heldFor({ onHand: 185, sources: [{ type: 'loans', amount: 40, freq: 'once' }] }), 22.5);
+  assert.equal(heldFor({ onHand: 185, held: 18.5 }), 18.5);
+  assert.equal(heldFor({ onHand: 185, cushion: false }), 0);
+});
+t('the semester-end week is prorated', () => {
+  const state = { setup: { startDate: '2026-11-02', semesterEnd: '2026-12-10' } };   // ends Thursday
+  assert.equal(weekShare(state, '2026-12-07'), 4 / 7);
+  assert.equal(weekShare(state, '2026-11-02'), 1);
+  assert.equal(weekShare({ setup: { startDate: '2026-11-04', semesterEnd: '2026-12-10' } }, '2026-11-02'), 5 / 7);
 });
 t('suggested split favors the top of the order and adds up', () => {
   const cats = suggestSplit(['food', 'transport', 'shopping', 'fun'], 55);

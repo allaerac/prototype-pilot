@@ -1,11 +1,11 @@
 // Prototype pilot app: setup, Home (ring + quick-log), Deals, Recap, sheets and limit alerts.
 // Rendering is plain template strings. State lives in store.js; pilot events go through track.js.
-import * as store from './store.js?v=47';
-import { track, flush, groupOn, dropGroup, tagQueue } from './track.js?v=47';
-import * as account from './account.js?v=47';
-import * as B from './budget.js?v=47';
-import { APP_VERSION } from './config.js?v=47';
-import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING as ALL_TRACKING, DEALS, QUOTES, SHOW_DEALS } from './content.js?v=47';
+import * as store from './store.js?v=48';
+import { track, flush, groupOn, dropGroup, tagQueue } from './track.js?v=48';
+import * as account from './account.js?v=48';
+import * as B from './budget.js?v=48';
+import { APP_VERSION } from './config.js?v=48';
+import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING as ALL_TRACKING, DEALS, QUOTES, SHOW_DEALS } from './content.js?v=48';
 // What we collect, minus the deals group while deals are switched off (content.js SHOW_DEALS)
 const TRACKING = ALL_TRACKING.filter(g => g.id !== 'deals' || SHOW_DEALS);
 if (!SHOW_DEALS) document.querySelectorAll('[data-tab="deals"]').forEach(b => b.remove());
@@ -185,6 +185,18 @@ function weekDays(wk) {
   return 7;
 }
 
+// Every Monday the weekly number is worked out again from the balance we assume (budget.js planWeeks), so a
+// payday week gets more. Runs before reportWeeks so a week nobody opened the app in still gets its own number.
+function planAhead() {
+  const s = S();
+  if (!s.setup) return;
+  const add = B.planWeeks(s, store.now());
+  if (!add.length) return;
+  store.update(st => { st.budgetHistory = [...(st.budgetHistory || []), ...add]; });
+  add.forEach(e => track('week_planned', { week: e.from, weekly: e.weekly, save: e.save }));
+}
+const balanceNow = () => B.assumedBalance(S(), store.now());
+
 // Send one week_closed event per finished week (the pilot's "weeks under budget" metric).
 function reportWeeks() {
   const s = S();
@@ -266,8 +278,24 @@ function answers() {
     cushion: draft.cushion
   };
 }
-// Weekly money from setup's answers, before the goal and before any − / + change.
-const grossWeekly = () => B.computeWeekly(answers(), store.now()).weekly;
+// What the weekly number is worked out from: setup's answers, plus the cushion already set aside (it stays put
+// unless they enter a new balance), money already saved for the goal, and the day paydays are counted from.
+function calc() {
+  const a = answers(), prev = S().setup;
+  const keepHeld = prev && !draft.balanceEntered && a.cushion && prev.cushion !== false;
+  const goal = prev && prev.goal ? B.goalProgress(S(), store.now()) : null;
+  return { ...a, held: keepHeld ? B.heldFor(prev) : null, saved: goal ? goal.total : 0, payFrom: (prev && prev.startDate) || B.dateKey(store.now()) };
+}
+// The budgetHistory entry in force this week.
+function entryNow() {
+  const wk = B.weekKey(store.now());
+  let v = null;
+  for (const b of S().budgetHistory || []) if (b.from <= wk) v = b;
+  return v;
+}
+// Weekly money from setup's answers, before the goal and before any − / + change. Changing just the split or
+// the goal keeps this week's number (fixedGross).
+const grossWeekly = () => (draft.fixedGross != null ? draft.fixedGross : B.computeWeekly(calc(), store.now()).weekly);
 
 // The goal as typed, or null when skipped or not filled in yet.
 function draftGoal() {
@@ -320,17 +348,17 @@ function paceText(rate) {
     const left = Math.max(0, g.target - (same ? B.goalProgress(S(), store.now()).total : 0));
     const days = Math.ceil(left / rate * 7), pick = Math.ceil(left / planned * 7);
     const when = dateText(B.dateKey(B.addDays(store.now(), days))), pickWhen = dateText(B.dateKey(B.addDays(store.now(), pick)));
-    if (days === pick) return { good: true, text: `Our pick: at ${money(rate)} a week you'll reach ${money(g.target)} by ${when}.` };
+    if (days === pick) return { good: true, text: `Our pick: ${money(g.target)} by ${when}.` };
     return days < pick
-      ? { good: true, text: `At ${money(rate)} a week you'll reach ${money(g.target)} on ${when}, ${daysText(pick - days)} sooner than our pick (${pickWhen}).` }
-      : { good: false, text: `At ${money(rate)} a week you'll reach ${money(g.target)} on ${when}, ${daysText(days - pick)} later than our pick (${pickWhen}).` };
+      ? { good: true, text: `${money(g.target)} by ${when}, ${daysText(pick - days)} sooner than our pick.` }
+      : { good: false, text: `${money(g.target)} by ${when}, ${daysText(days - pick)} later than our pick (${pickWhen}).` };
   }
   const chunk = g.kind === 'every' ? g.amount : Math.round(planned * 52 / 12);
   const days = Math.max(1, Math.round(chunk / rate * 7)), pick = Math.max(1, Math.round(chunk / planned * 7));
   if (days === pick) return { good: true, text: `Our pick: ${money(chunk)} put away every ${daysText(pick)}.` };
   return days < pick
-    ? { good: true, text: `You'll put away ${money(chunk)} every ${daysText(days)} instead of every ${daysText(pick)}: ${daysText(pick - days)} sooner than our pick.` }
-    : { good: false, text: `You'll put away ${money(chunk)} every ${daysText(days)} instead of every ${daysText(pick)}: ${daysText(days - pick)} slower than our pick.` };
+    ? { good: true, text: `${money(chunk)} every ${daysText(days)}, ${daysText(pick - days)} sooner than our pick.` }
+    : { good: false, text: `${money(chunk)} every ${daysText(days)}, ${daysText(days - pick)} slower than our pick.` };
 }
 
 // The split always matches the spending number. If it changed, an edited split is resized ("a bit from
@@ -381,10 +409,18 @@ function startSetup(redo, at, claim) {
   draft.incomeOnly = at === 'income-only';
   step = at ? Math.max(0, steps().indexOf(at)) : 0;
   draft.at = at;
+  // Redo setup and Money coming in start from the balance we assume now (one-time money is already in it)
+  if (redo && (!at || draft.incomeOnly) && S().setup) {
+    const bal = B.assumedBalance(S(), store.now());
+    draft.onHand = String(Math.max(0, Math.round(bal.amount)));
+    draft.incomes = draft.incomes.filter(x => x.freq !== 'once');
+    draft.reanchor = true;
+  }
   // "Change split", "Change goal" and "Money coming in" keep how far the student moved off our pick
-  if (at === 'split' || at === 'goal' || draft.incomeOnly) {
-    const cur = B.weeklyFor(S().budgetHistory || [], B.weekKey(store.now()));
-    draft.adjust = cur - (grossWeekly() - saveWeekly());
+  const e = entryNow();
+  if ((at === 'split' || at === 'goal' || draft.incomeOnly) && e) {
+    if (!draft.incomeOnly) draft.fixedGross = e.gross != null ? e.gross : e.weekly;
+    draft.adjust = draftGoal() ? saveWeekly() - (Number(e.save) || 0) : 0;
   }
   setupStarted = Date.now();
   mode = 'setup';
@@ -413,33 +449,33 @@ function setupBody(name) {
     }
     return `<span class="s-mono when">Your username</span>
       <h3>What's your name?</h3>
-      <p class="sub">Your first and last name plus any 2 numbers make your username. Remember it: it's how you get everything back on another phone.</p>
+      <p class="sub">Your name + any 2 numbers is your username. Remember it to log in on another phone.</p>
       ${usernameField()}`;
   }
   if (name === 'login') {
     return `<span class="s-mono when">Welcome back</span>
       <h3>Log in</h3>
-      <p class="sub">Your name and the 2 numbers you picked bring back your budget and purchases.</p>
+      <p class="sub">Your name and 2 numbers bring everything back.</p>
       ${usernameField()}`;
   }
   if (name === 'onhand') {
     return `<span class="s-mono when">About a minute</span>
       <h3>How much do you have right now?</h3>
-      <p class="sub">What's in your account or wallet that you can spend this semester. $0 is fine.</p>
+      <p class="sub">In your account or wallet right now. $0 is fine.</p>
       <div class="money-row"><div class="row"><label for="onhand">Right now</label>
         <span class="money-in"><span>$</span><input id="onhand" data-onhand inputmode="decimal" autocomplete="off" placeholder="0" value="${esc(draft.onHand)}"></span></div></div>`;
   }
   if (name === 'income') {
     const none = !draft.incomes.length;
     return `<h3>What money is still coming in?</h3>
-      <p class="sub">Add each one: a paycheck, money from family, a refund. For a job, use a typical paycheck.</p>
+      <p class="sub">Paychecks, money from family, refunds. Add each one.</p>
       ${moneyRows('inc', draft.incomes, SOURCES, FREQS)}
       <div class="chips">${SOURCES.map(x => `<button class="chip" data-add="inc:${x.id}">+ ${esc(x.name)}</button>`).join('')}</div>
       ${none ? `<p class="s-soft">${Number(draft.onHand) > 0 ? 'Nothing else coming in? Just continue.' : 'Add at least one, or go back and enter the money you have now.'}</p>` : ''}`;
   }
   if (name === 'bills') {
     return `<h3>Any bills you pay yourself?</h3>
-      <p class="sub">Rent, phone, subscriptions: anything that comes out of your own money on a schedule.</p>
+      <p class="sub">Rent, phone, subscriptions.</p>
       ${moneyRows('bill', draft.bills, BILLS, BILL_FREQS)}
       <div class="chips">
         <button class="chip${draft.bills.length ? '' : ' sel'}" data-nobills>No bills</button>
@@ -478,7 +514,7 @@ function setupBody(name) {
     const removed = draft.categories.filter(c => !draft.order.includes(c.id));
     return `<span class="s-mono when">Your ${money(draft.splitBase)} a week</span>
       <h3>Split up your week</h3>
-      <p class="sub">Amounts are per week. Most important at the top: if you go over in one, the ones at the bottom shrink first.</p>
+      <p class="sub">Per week. Top is most important: go over in one and the bottom ones shrink first.</p>
       <div class="money-rows split-rows">${draft.order.map((id, i) => {
         const c = cat(id);
         // one line per category: amounts by default, ↑ ↓ ✕ while reordering
@@ -507,14 +543,14 @@ function setupBody(name) {
   }
   if (name === 'end') {
     return `<h3>When does your semester end?</h3>
-      <p class="sub">We spread your money across the weeks until then.</p>
+      <p class="sub">Your money has to last until then.</p>
       <input type="date" class="date-in" data-end value="${esc(draft.semesterEnd)}" min="${B.dateKey(B.addDays(now, 1))}">
       ${draft.semesterEnd ? `<p class="s-soft">${Math.max(1, (B.daysBetween(now, B.parseKey(draft.semesterEnd)) + 1) / 7).toFixed(1)} weeks from today</p>` : ''}`;
   }
   if (name === 'stress') {
     const v = draft.stress;
     return `<h3>How stressed are you about money right now?</h3>
-      <p class="sub">Just slide it. We'll ask once a day on Home to see if the app actually helps.</p>
+      <p class="sub">Just slide it. We'll ask once a day on Home.</p>
       <div class="stress-setup">
         <span class="stress-big" data-stress-label>${v == null ? '–' : v + '%'}</span>
         <input type="range" class="stress-range${v == null ? '' : ' set'}" min="0" max="100" step="1" value="${v == null ? 50 : v}" data-sstress aria-label="How stressed about money are you, 0 to 100" style="--v:${v == null ? 50 : v}%">
@@ -522,7 +558,7 @@ function setupBody(name) {
       </div>`;
   }
   if (name === 'result') {
-    const r = B.computeWeekly(answers(), now);
+    const r = B.computeWeekly(calc(), now);
     const g = draftGoal(), bits = resultBits();
     const save = actualSave(), p = paceRange();
     return `<span class="s-mono when">Your weekly number</span>
@@ -540,9 +576,9 @@ function setupBody(name) {
         ${g || draft.incomeOnly ? '' : `<button class="text-btn add-goal" data-goto-goal>Saving for something? Add a goal &rarr;</button>`}
       </div>
       <div data-r-impact>${bits.impact}</div>
-      <button class="link how-link" data-sheet="math">How we got this number &rarr;</button>
-      ${r.weekly <= 0 ? `<p class="note">Your bills use up most of what's coming in. Let's double-check the numbers.</p>`
-        : bits.firstWeek !== null ? `<p class="s-soft" data-r-first>This week is shorter, so it starts at ${money(bits.firstWeek)} for ${SHORT[now.getDay()]}–Sun.</p>` : ''}`;
+      <button class="link how-link" data-sheet="math">How we got this &rarr;</button>
+      ${r.weekly <= 0 && draft.fixedGross == null ? `<p class="note">${r.until < draft.semesterEnd ? `Nothing to spend until ${dateText(B.dateKey(B.addDays(B.parseKey(r.until), 1)))}.` : 'Your bills use up what\'s coming in.'} Double-check your numbers.</p>`
+        : bits.note ? `<p class="s-soft" data-r-first>${bits.note}</p>` : ''}`;
   }
   if (name === 'ready') {
     const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
@@ -582,26 +618,35 @@ function goalPreview() {
 // The parts of the weekly-number screen that change while they slide: the number, the line under it,
 // the "days sooner / later" note and the math.
 function resultBits() {
-  const now = store.now(), r = B.computeWeekly(answers(), now);
+  const now = store.now(), r = B.computeWeekly(calc(), now);
   const g = draftGoal(), weekly = spendWeekly(), save = actualSave();
+  const untilText = dateText(r.until), short = r.until < draft.semesterEnd;
   const lines = [];
-  if (r.onHand > 0) lines.push(['Money you have now', money(r.onHand)]);
-  if (r.oneTime > 0) lines.push(['One-time money coming in', money(r.oneTime)]);
-  if (r.held > 0) lines.push(['Kept aside as a 10% cushion', money(-r.held)]);
-  if (r.pot > 0) lines.push([`Spread over ${r.weeksLeft.toFixed(1)} weeks left`, money(r.potWeekly) + '/wk']);
-  if (r.weeklyIn > 0) lines.push(['Paychecks and other income', '+' + money(r.weeklyIn) + '/wk']);
-  if (r.weeklyBills > 0) lines.push(['Bills', money(-r.weeklyBills) + '/wk']);
+  if (draft.fixedGross != null) lines.push(['Your number this week', money(draft.fixedGross)]);
+  else {
+    lines.push(['You have now', money(r.onHand)]);
+    if (r.oneTime > 0) lines.push(['One-time money', '+' + money(r.oneTime)]);
+    if (r.inBefore > 0) lines.push([`Coming in by ${untilText}`, '+' + money(r.inBefore)]);
+    if (r.billsBefore > 0) lines.push([`Bills by ${untilText}`, money(-r.billsBefore)]);
+    if (r.held > 0) lines.push(['10% cushion', money(-r.held)]);
+    if (r.saved > 0) lines.push(['Already saved', money(-r.saved)]);
+    lines.push([`Lasts until ${untilText}`, `${r.untilWeeks.toFixed(1)} wks`]);
+  }
   if (g) lines.push([`Saving for ${g.name}`, money(-save) + '/wk']);
   const pace = paceText(save);
   const daysIn = 7 - ((now.getDay() + 6) % 7);
+  const up = draft.fixedGross == null && r.up ? `goes up ${dateText(r.up.date)}, when ${money(r.up.amount)} lands` : '';
+  const cap = t => t[0].toUpperCase() + t.slice(1);
+  const first = !draft.redo && daysIn < 7 ? `This week: ${money(Math.round(weekly * daysIn / 7))} (${SHORT[now.getDay()]}–Sun)` : '';
+  const note = first && up ? `${first}. Then it ${up}.` : first ? first + '.' : up ? cap(up) + '.' : '';
   return {
     weekly,
-    sub: `to spend each week${g ? `, after ${money(save)} for ${esc(g.name)}` : ''}`,
+    sub: `to spend each week${short && draft.fixedGross == null ? ` until ${untilText}` : ''}${g ? `, after ${money(save)} for ${esc(g.name)}` : ''}`,
     impact: pace ? `<p class="impact${pace.good ? ' good' : ''}" aria-live="polite">${esc(pace.text)}</p>` : '',
-    breakdown: `<span class="s-mono">How we got this</span>
-      ${lines.map(([k, v]) => `<div class="set-row"><span class="s-soft">${esc(k)}</span><b>${v}</b></div>`).join('')}
-      <div class="set-row total"><span>Each week${!g && !draft.adjust && r.raw - r.weekly >= 0.5 ? ' <small>(rounded down to $5)</small>' : ''}</span><b>${money(weekly)}</b></div>`,
-    firstWeek: !draft.redo && daysIn < 7 ? Math.round(weekly * daysIn / 7) : null
+    breakdown: `${lines.map(([k, v]) => `<div class="set-row"><span class="s-soft">${esc(k)}</span><b>${v}</b></div>`).join('')}
+      <div class="set-row total"><span>Each week${!g && !draft.adjust && r.raw - r.weekly >= 0.5 ? ' <small>(rounded down to $5)</small>' : ''}</span><b>${money(weekly)}</b></div>
+      <p class="s-soft math-note">${up ? cap(up) + '. ' : ''}We redo it every Monday from your balance.</p>`,
+    note
   };
 }
 function refreshResult() {
@@ -611,7 +656,7 @@ function refreshResult() {
   set('[data-r-sub]', bits.sub);
   set('[data-r-impact]', bits.impact);
   set('[data-r-breakdown]', bits.breakdown);
-  if (bits.firstWeek !== null) set('[data-r-first]', `This week is shorter, so it starts at ${money(bits.firstWeek)} for ${SHORT[store.now().getDay()]}–Sun.`);
+  if (bits.note) set('[data-r-first]', bits.note);
   viewsEl.querySelectorAll('[data-pace]').forEach(b => b.classList.toggle('sel', Number(b.dataset.paceV) === save));
   const range = viewsEl.querySelector('[data-save]');
   if (range && p.hi > p.lo) range.style.setProperty('--v', ((save - p.lo) / (p.hi - p.lo) * 100).toFixed(1) + '%');
@@ -709,6 +754,7 @@ async function nextStep() {
     if (draft.claim) { enterApp('home'); return; }
   }
   track('setup_step', { step: name, redo: !!draft.redo });
+  if (name === 'onhand') draft.balanceEntered = true;
   if (name === 'result' && draft.incomeOnly) { ensureSplit(); finishSetup(); return; }   // the split resizes to the new number
   if (name === 'split') { finishSetup(); if (draft.redo) return; }
   if (name === 'ready') { enterApp('home'); return; }
@@ -749,6 +795,7 @@ async function logIn() {
   tagQueue(u);
   track('login', { restored: !!(r.backup && r.backup.setup) });
   if (S().setup) {
+    planAhead();
     reportWeeks();
     enterApp('home');
     showToast('Welcome back', `Everything from @${u} is back on this phone.`);
@@ -760,7 +807,7 @@ async function logIn() {
 function finishSetup() {
   const now = store.now();
   const a = answers();
-  const r = B.computeWeekly(a, now);
+  const r = B.computeWeekly(calc(), now);
   const gross = grossWeekly();            // weekly money before the goal and − / +
   const planned = saveWeekly();           // what the goal asks for each week
   const weekly = spendWeekly();           // what they spend: Home's ring and the split
@@ -774,6 +821,15 @@ function finishSetup() {
   const prevGoal = S().setup && S().setup.goal;
   const same = g && prevGoal && JSON.stringify({ ...g, since: 0 }) === JSON.stringify({ ...B.goalFields(prevGoal), since: 0 });
   const goal = g ? { ...g, perWeek: planned, since: same ? prevGoal.since : wk } : null;
+  // This week's budget. A first setup starts fresh. Changing just the split or goal moves this week by however
+  // much the number changed. A new number from today's balance counts what's already spent this week once
+  // (the balance already has it taken out), plus the new number for the days left.
+  const e = entryNow();
+  let base = weekly;
+  if (draft.redo && e) {
+    if (draft.fixedGross != null) base = Math.max(0, e.weekly + weekly - ((e.gross != null ? e.gross : e.weekly) - (Number(e.save) || 0)));
+    else base = Math.max(0, Math.round((B.spentInWeek(S().tx, wk) + weekly * B.daysLeftInWeek(now) / 7 - B.addedInWeek(S().tx, wk)) / (B.weekShare(S(), wk) || 1)));
+  }
   store.update(st => {
     st.setup = {
       ...a,
@@ -783,12 +839,15 @@ function finishSetup() {
       goal,
       startDate: st.setup && st.setup.startDate ? st.setup.startDate : B.dateKey(now),
       completedAt: now.toISOString(),
+      // the cushion and when "money you have now" was true; changing just the split or goal keeps both
+      held: r.held,
+      balanceAt: !st.setup || draft.reanchor || draft.balanceEntered ? now.toISOString() : (st.setup.balanceAt || st.setup.completedAt),
       suggested: r.weekly,
       weekly,
       baselineStress: draft.redo ? (st.setup && st.setup.baselineStress) : draft.stress
     };
     st.budgetHistory = (st.budgetHistory || []).filter(b => b.from !== wk);
-    st.budgetHistory.push({ from: wk, weekly, gross, save, order, cats });
+    st.budgetHistory.push({ from: wk, weekly: base, gross, save, order, cats: base === weekly ? cats : B.scaleSplit(order, cats, base) });
     st.budgetHistory.sort((x, y) => (x.from < y.from ? -1 : 1));
   });
   track(draft.redo ? 'setup_redo_complete' : 'setup_complete', {
@@ -809,6 +868,7 @@ function finishSetup() {
     adjust: draft.adjust,
     pace: g ? paceName(save) : null,
     weeks_left: Math.round(r.weeksLeft * 10) / 10,
+    until_payday: r.until < a.semesterEnd,
     edit: draft.incomeOnly ? 'income' : draft.at || null,
     seconds: Math.round((Date.now() - setupStarted) / 1000),
     baseline_stress: draft.redo ? undefined : draft.stress
@@ -834,7 +894,8 @@ function vhead(eyebrow, title, right) {
 // The line at the bottom of every tab: where to send feedback or look for answers.
 const feedbackNote = () => `<button class="view-note" data-sheet="settings">Questions or ideas? <b>Settings</b> → <b>Send feedback</b></button>`;
 // On Home, the same line turns into the check-in while one is waiting.
-const homeNote = () => dueSurvey() ? `<button class="view-note" data-sheet="survey">Got 30 seconds? <b>${dueSurvey() === 'final' ? 'Last check-in' : 'Quick check-in'}</b> →</button>` : feedbackNote();
+// Home keeps its bottom line for the check-in only (feedback lives in Settings).
+const homeNote = () => dueSurvey() ? `<button class="view-note" data-sheet="survey">Got 30 seconds? <b>${dueSurvey() === 'final' ? 'Last check-in' : 'Quick check-in'}</b> →</button>` : '';
 function streakLabel() {
   const n = B.streak(S(), store.now());
   const closed = B.closedWeeks(S(), store.now()).length;
@@ -851,18 +912,21 @@ function homeHTML() {
   const w = weekStats(wk);
   const split = B.splitFor(S().budgetHistory || [], wk);
   const spentBy = w.spentBy;
-  const daysLeft = B.daysLeftInWeek(now);
-  const total = weekDays(wk);
+  // the semester's last week ends on its last day
+  const end = S().setup.semesterEnd;
+  const daysLeft = Math.max(1, Math.min(B.daysLeftInWeek(now), B.daysBetween(now, B.parseKey(end)) + 1));
+  const total = Math.max(1, Math.round(B.weekShare(S(), wk) * 7));
   const elapsed = Math.max(0, total - daysLeft);
   let pace, warm = false;
-  if (w.budget <= 0) { pace = 'Set a weekly number in Settings'; warm = true; }
-  else if (w.left <= 0) { warm = true; pace = w.left < 0 ? `${money(-w.left)} past this week's number · resets Monday` : `That's this week's number · resets Monday`; }
+  if (w.budget <= 0) { pace = 'Nothing to spend this week'; warm = true; }
+  else if (w.left <= 0) { warm = true; pace = w.left < 0 ? `${money(-w.left)} over · resets Monday` : `All used · resets Monday`; }
   else {
     const perDay = Math.floor(w.left / daysLeft);
     const expected = w.budget * (elapsed + 1) / total;   // what's fine to have spent by the end of today
-    if (w.spent <= expected + 0.5) pace = `On pace · about ${money(perDay)} a day keeps you there`;
-    else { warm = true; pace = `About ${money(perDay)} a day for the rest of the week`; }
+    if (w.spent <= expected + 0.5) pace = `On pace · ${money(perDay)} a day`;
+    else { warm = true; pace = `Slow down · ${money(perDay)} a day left`; }
   }
+  const bal = balanceNow();
   const items = w.items.slice().sort((a, b) => (a.at < b.at ? 1 : -1));
   const rows = items.map(txRow).join('');
   return `<section class="view" data-view="home" aria-label="Home">
@@ -875,10 +939,13 @@ function homeHTML() {
           <div class="ring-center">
             <span class="s-mono">Left this week</span>
             <span class="ring-num">${money(Math.floor(Math.max(0, w.left)))}</span>
-            <span class="s-soft">of ${money(w.budget)} &middot; ${Math.round(w.pct * 100)}% used</span>
+            <span class="s-soft"><span class="only-portrait">left </span>of ${money(w.budget)}</span>
           </div>
         </div>
-        <span class="pace${warm ? ' warm' : ''}">${pace}</span>
+        <div class="hero-foot">
+          <span class="pace${warm ? ' warm' : ''}">${pace}</span>
+          <button class="bal-chip" data-sheet="balance" aria-label="Assumed balance ${money(bal.amount)}. Tap if it's wrong">Balance <b>${money(bal.amount)}</b></button>
+        </div>
       </div>
       <div class="col">
         ${stressCardHTML()}
@@ -899,8 +966,8 @@ function homeHTML() {
             return `<div class="cat"><div class="cat-ring">${catRing('cat-' + c.id, c.color, Math.min(1, pct))}<span>${Math.round(pct * 100)}%</span></div><b>${esc(c.name)}</b><em>${money(spent)}</em></div>`;
           }).join('')}</div>`}
         </div>
-        <div class="card fill">
-          <div class="card-head"><b>Logged this week <span class="s-mono">${items.length}</span></b>${items.length ? `<button class="link" data-sheet="purchases">See all &rarr;</button>` : ''}</div>
+        <div class="card fill logged">
+          <div class="card-head"><b>Logged this week <span class="s-mono">${items.length}</span></b>${items.length ? `<button class="link" data-sheet="purchases">See all &rarr;</button>` : `<span class="s-soft only-portrait">Tap + to add one</span>`}</div>
           ${items.length ? `<div class="list scrolls">${rows}</div>`
           : `<div class="empty"><b>Nothing logged yet</b><span class="s-soft">Tap + after you buy something. It takes 5 seconds.</span></div>`}
         </div>
@@ -1087,11 +1154,20 @@ function checkSurveyDue() {
   showToast(due === 'final' ? 'One last check-in' : 'Quick check-in', due === 'final' ? 'The pilot is wrapping up. 30 seconds to tell us how it went?' : 'Got 30 seconds? Tell us how the app is going.', 'survey');
   track('survey_prompt_shown', { survey: due, active_days: usedDays() });
 }
+// Once a week from the second week: "Still about $X?", since unlogged spending makes our guess drift.
+function checkBalanceDue() {
+  if (mode !== 'app' || sheet || toastEl.classList.contains('on')) return;
+  const s = S(), wk = B.weekKey(store.now());
+  if (!s.setup || wk === B.weekKey(B.parseKey(s.setup.startDate)) || s.balanceChecked === wk || s.balancePrompted === wk) return;
+  store.update(st => { st.balancePrompted = wk; });
+  showToast(`Still about ${money(balanceNow().amount)}?`, "That's our guess for your balance.", 'balance');
+  track('balance_check_shown', { week: wk });
+}
 // Recap's "Where your money's headed": money left to spend this semester if they stick to the plan (dashed)
 // vs at the pace they're actually spending (solid), from today to the semester end, plus one plain sentence.
 function projectionHTML() {
   const s = S(), now = store.now();
-  const p = B.projection(s, now);
+  const p = B.projection(s, now, B.weeklyFrom(s, now).total);
   if (!p || p.weeks < 1) return `<div class="proj"><div class="card-head"><b>Where your money's headed</b></div><p class="s-soft">The semester's almost over, so there's nothing left to project.</p></div>`;
   const end = dateText(s.setup.semesterEnd);
   const head = `<div class="card-head"><b>Where your money's headed</b><span class="s-mono">Today → ${end}</span></div>`;
@@ -1101,19 +1177,16 @@ function projectionHTML() {
   const X = t => L + (t / p.weeks) * (W - L - R), Y = v => T + (hi - v) / (hi - lo) * (H - T - Bm);
   const line = key => p.points.map(x => `${X(x.t).toFixed(1)},${Y(x[key]).toFixed(1)}`).join(' ');
   const short = p.runOut != null;
-  const diff = Math.round(p.pace - p.plan);
   const sentence = short
-    ? `At about ${money(p.pace)} a week you'd run out around ${dateText(B.dateKey(p.runOut))}, ${daysText(B.daysBetween(p.runOut, B.parseKey(s.setup.semesterEnd)))} early. ${money(Math.ceil(p.pace - p.start / p.weeks))} less a week gets you there.`
-    : diff > 0
-      ? `At about ${money(p.pace)} a week you'll make it to ${end} with ${money(p.endLeft)} to spare.`
-      : `At about ${money(p.pace)} a week you'll finish ${end} with about ${money(p.endLeft)} extra. Nice.`;
+    ? `At ${money(p.pace)} a week you'd run out around ${dateText(B.dateKey(p.runOut))}. About ${money(Math.floor(p.plan))} a week makes it to ${end}.`
+    : `At ${money(p.pace)} a week you'll make it to ${end} with ${money(p.endLeft)} left.`;
   return `<div class="proj">${head}
     <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
       ${lo < 0 ? `<line x1="${L}" x2="${W - R}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}" class="proj-zero"/>` : ''}
       <polyline points="${line('plan')}" class="proj-plan"/>
       <polyline points="${line('pace')}" class="proj-pace${short ? ' short' : ''}"/>
     </svg>
-    <div class="proj-key"><span><i class="k-pace${short ? ' short' : ''}"></i>Your pace</span><span><i class="k-plan"></i>Plan ${money(p.plan)}/wk</span><span class="proj-end">${money(p.start)} today</span></div>
+    <div class="proj-key"><span><i class="k-pace${short ? ' short' : ''}"></i>Your pace</span><span><i class="k-plan"></i>Plan</span><span class="proj-end">${money(p.start)} today</span></div>
     <p class="proj-say${short ? ' short' : ''}">${esc(sentence)}</p>
   </div>`;
 }
@@ -1163,7 +1236,7 @@ function recapHTML() {
           ${sealed ? [0, 45, 90, 135, 180, 225, 270, 315].map((a, i) => `<span class="spark" style="--a:${a}deg;background:${['#6474FF', '#3BCFBF', '#FF9FBD'][i % 3]}"></span>`).join('') : ''}
         </div>
         <div><h4>${head}</h4><span class="s-soft">${sub}</span>
-          ${kind === 'closing' ? '' : `<span class="recap-next">${kind === 'first' ? `It's ready ${now.getDay() === 0 ? 'next ' : ''}Sunday at 6 pm, and you'll get a notification in the app when it is.` : "Next recap: Sunday at 6 pm. You'll get a notification in the app when it's ready."}</span>`}
+          ${kind === 'closing' ? '' : `<span class="recap-next">${kind === 'first' ? `Ready ${now.getDay() === 0 ? 'next ' : ''}Sunday at 6 pm.` : "Next recap: Sunday at 6 pm."}</span>`}
           <div class="only-portrait-block" style="margin-top:.6em">${streakPill()}</div></div>
       </div>
       <div class="rcol">
@@ -1230,9 +1303,13 @@ let confirmReset = false;
 let openTrack = null;   // the "What we collect" group that's open (one at a time)
 let dealDay = null;     // the day the All deals sheet is showing
 let surveyDraft = {};
+let balDraft = '';       // what's typed in Your balance
+let balFrom = 'home';    // where Your balance was opened: home, settings or check (the weekly notification)
 
 function openSheet(name, arg) {
+  const was = sheet;
   sheet = name;
+  if (name === 'balance') { balDraft = ''; balFrom = arg || (was === 'settings' ? 'settings' : 'home'); }
   if (name === 'data') openTrack = null;
   if (name === 'log') {
     const last = S().tx[S().tx.length - 1];
@@ -1283,7 +1360,7 @@ function renderSheet() {
       <div class="chips kind-chips" role="radiogroup" aria-label="Spent or money in">${[['out', 'Spent'], ['in', 'Money in']].map(([k, label]) => `<button class="chip${logDraft.kind === k ? ' sel' : ''}" role="radio" aria-checked="${logDraft.kind === k}" data-kind="${k}">${label}</button>`).join('')}</div>
       <div class="amount${logDraft.kind === 'in' ? ' in' : ''}" aria-live="polite"><small>${logDraft.kind === 'in' ? '+' : ''}$</small>${amountText(logDraft.amount)}</div>
       ${logDraft.kind === 'in'
-        ? `<p class="s-soft kind-help">Adds to what you can spend this week. For money that comes every week, change Money coming in in Settings.</p>`
+        ? `<p class="s-soft kind-help">Adds to what you can spend this week.</p>`
         : `<div class="chips" style="justify-content:center">${activeCats().map(c => `<button class="chip${logDraft.cat === c.id ? ' sel' : ''}" data-cat="${c.id}">${esc(c.name)}</button>`).join('')}</div>`}
       <div class="row">
         <input class="field" data-note maxlength="40" placeholder="${logDraft.kind === 'in' ? 'From? (optional)' : 'Where? (optional)'}" value="${esc(logDraft.note)}" autocomplete="off">
@@ -1333,7 +1410,8 @@ function renderSheet() {
     html = `<div class="sheet-head"><div><h4 id="sheetTitle">Settings</h4><span class="s-soft sheet-sub">${s.username ? '@' + esc(s.username) + ' &middot; ' : ''}${esc(APP_NAME)} ${APP_VERSION}</span></div><button class="x" data-close aria-label="Close">${xIcon}</button></div>
       <div class="sheet-body">
         <div class="set-list">
-          <div class="set-row"><div><span>Weekly number</span><small>${money(B.weeklyFor(s.budgetHistory, wk))} a week until ${end}</small></div><button class="chip" data-redo>Redo setup</button></div>
+          ${s.setup ? `<div class="set-row"><div><span>Assumed balance</span><small>${money(balanceNow().amount)} · our guess</small></div><button class="chip" data-sheet="balance">Update</button></div>` : ''}
+          <div class="set-row"><div><span>Weekly number</span><small>${money(B.weeklyFor(s.budgetHistory, wk))} this week · updates Mondays till ${end}</small></div><button class="chip" data-redo>Redo setup</button></div>
           ${s.setup ? `<div class="set-row"><div><span>Money coming in</span><small>${incomeSummary(s.setup)}</small></div><button class="chip" data-income-open>Change</button></div>
           <div class="set-row"><div><span>Category split</span><small>${activeCats().map(c => esc(c.name)).join(' › ')}</small></div><button class="chip" data-resplit-open>Change</button></div>
           <div class="set-row"><div><span>Savings goal</span><small>${s.setup.goal ? `${esc(s.setup.goal.name)} · ${money(s.setup.goal.perWeek)} a week` : 'Nothing yet'}</small></div><button class="chip" data-goal-open>${s.setup.goal ? 'Change' : 'Set one'}</button></div>` : ''}
@@ -1345,10 +1423,26 @@ function renderSheet() {
           <div class="set-row"><div><span class="danger">Erase everything on this phone</span></div><button class="chip danger" data-reset>${confirmReset ? 'Tap again' : 'Erase'}</button></div>
         </div>
       </div>`;
+  } else if (sheet === 'balance') {
+    // what we assume they have, how we got it, and a box to fix it
+    const b = balanceNow(), since = new Date(b.since);
+    const rows = [[`${MONTHS[since.getMonth()]} ${since.getDate()} you had`, money(b.start, true)]];
+    if (b.spent) rows.push(['Spent since', money(-b.spent, true)]);
+    if (b.added) rows.push(['Money in since', '+' + money(b.added, true)]);
+    if (b.paid) rows.push(['Paydays (assumed)', '+' + money(b.paid, true)]);
+    if (b.bills) rows.push(['Bills (assumed)', money(-b.bills, true)]);
+    html = `${sheetHead('Your balance')}
+      <div class="sheet-body">
+        <div class="breakdown">${rows.map(([k, v]) => `<div class="set-row"><span class="s-soft">${k}</span><b>${v}</b></div>`).join('')}
+          <div class="set-row total"><span>Assumed now</span><b>${money(b.amount, true)}</b></div></div>
+        <div class="money-row"><div class="row"><label for="balin">Actually have</label>
+          <span class="money-in"><span>$</span><input id="balin" data-balin inputmode="decimal" autocomplete="off" placeholder="${Math.round(b.amount)}" value="${esc(balDraft)}" data-autofocus></span></div></div>
+      </div>
+      <button class="cta" data-bal-save>${balDraft ? 'Update my number' : 'Looks right'}</button>`;
   } else if (sheet === 'math') {
     // setup's weekly-number math, from the answers being edited
     html = `${sheetHead('How we got this')}
-      <div class="sheet-body"><div class="breakdown">${draft ? resultBits().breakdown.replace('<span class="s-mono">How we got this</span>', '') : ''}</div></div>`;
+      <div class="sheet-body"><div class="breakdown">${draft ? resultBits().breakdown : ''}</div></div>`;
   } else if (sheet === 'data') {
     // before setup's consent step the student can already pick; after "Use it without sharing" nothing is sent
     const off = !s.sharing;
@@ -1389,6 +1483,29 @@ function renderSheet() {
   }
   sheetEl.innerHTML = html;
   fitAll();
+}
+
+// Your balance → Update: the new balance re-anchors the math and the rest of this week is worked out again.
+function saveBalance() {
+  const now = store.now(), b = balanceNow(), wk = B.weekKey(now);
+  const v = balDraft === '' ? null : Math.round(Number(balDraft) * 100) / 100;
+  if (v == null || Math.abs(v - b.amount) < 0.5) {
+    store.update(st => { st.balanceChecked = wk; });
+    track('balance_check', { answer: 'right', from: balFrom });
+    closeSheet();
+    return;
+  }
+  store.update(st => {
+    st.balance = { at: now.toISOString(), amount: v };
+    st.balanceChecked = wk;
+    const { entry } = B.replanNow(st, now);
+    st.budgetHistory = (st.budgetHistory || []).filter(x => x.from !== entry.from).concat(entry).sort((x, y) => (x.from < y.from ? -1 : 1));
+  });
+  track('balance_check', { answer: 'updated', from: balFrom, higher: v > b.amount, off_pct: Math.round(Math.abs(v - b.amount) / Math.max(1, Math.abs(b.amount)) * 100) });
+  closeSheet();
+  renderApp(false);
+  const w = weekStats(wk);
+  showToast('Balance updated', `${money(Math.max(0, Math.floor(w.left)))} left this week.`);
 }
 
 function keypad(k) {
@@ -1457,7 +1574,7 @@ function showToast(title, body, goTo) {
     </div>
     <b>${esc(title)}</b>
     <p>${esc(body)}</p>
-    ${goTo ? `<button class="link toast-go" data-toast-go="${goTo}">${goTo === 'survey' ? 'Start' : 'See it'} &rarr;</button>` : ''}`;
+    ${goTo ? `<button class="link toast-go" data-toast-go="${goTo}">${goTo === 'survey' ? 'Start' : goTo === 'balance' ? 'Check' : 'See it'} &rarr;</button>` : ''}`;
   toastEl.classList.add('on');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toastEl.classList.remove('on'), 9000);
@@ -1471,7 +1588,7 @@ app.addEventListener('click', e => {
   const s = S();
 
   if ('dismiss' in d) { toastEl.classList.remove('on'); return; }
-  if (d.toastGo) { toastEl.classList.remove('on'); closeSheet(); if (d.toastGo === 'survey') openSheet('survey'); else go(d.toastGo); return; }
+  if (d.toastGo) { toastEl.classList.remove('on'); closeSheet(); if (d.toastGo === 'survey') openSheet('survey'); else if (d.toastGo === 'balance') openSheet('balance', 'check'); else go(d.toastGo); return; }
   if ('close' in d) { closeSheet(); return; }
 
   // setup
@@ -1560,6 +1677,7 @@ app.addEventListener('click', e => {
 
   // settings
   if ('redo' in d) { closeSheet(); startSetup(true); return; }
+  if ('balSave' in d) { saveBalance(); return; }
   if ('incomeOpen' in d) { closeSheet(); startSetup(true, 'income-only'); return; }
   if ('resplitOpen' in d) { closeSheet(); startSetup(true, 'split'); return; }
   if ('goalOpen' in d) { closeSheet(); startSetup(true, 'goal'); return; }
@@ -1649,6 +1767,12 @@ app.addEventListener('input', e => {
   const d = t.dataset;
   const clean = v => v.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1').replace(/^(\d{0,6})\d*/, '$1').replace(/(\.\d{0,2})\d*/, '$1');
   if ('newcat' in d) { draft.newCat = t.value; return; }
+  if ('balin' in d) {
+    t.value = clean(t.value); balDraft = t.value;
+    const btn = sheetEl.querySelector('[data-bal-save]');
+    if (btn) btn.textContent = balDraft ? 'Update my number' : 'Looks right';
+    return;
+  }
   if ('save' in d) { draft.adjust = saveWeekly() - Number(t.value); refreshResult(); return; }
   // stress sliders: the fill and the % follow the thumb; the answer is saved when they let go ('change' below)
   if ('sstress' in d || 'stressday' in d) {
@@ -1710,6 +1834,7 @@ function refreshIfNewDay() {
   if (today === lastDay) return;
   lastDay = today;
   markActiveDay();
+  planAhead();
   reportWeeks();
   if (mode === 'app' && !sheet) renderApp(false);
 }
@@ -1719,6 +1844,7 @@ document.addEventListener('visibilitychange', () => {
   markActiveDay();
   refreshIfNewDay();
   checkRecapReady();
+  checkBalanceDue();
   checkSurveyDue();
 });
 setInterval(() => { refreshIfNewDay(); checkRecapReady(); }, 60000);
@@ -1740,8 +1866,9 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
   const s = S();
   if (s.setup) {
     track('app_open', { standalone: isStandalone(), resumed: false, days_since_start: daysSinceStart() });
+    planAhead();
     reportWeeks();
-    if (s.username) { enterApp('home'); account.backupSoon(); setTimeout(() => { checkRecapReady(); checkSurveyDue(); }, 900); }
+    if (s.username) { enterApp('home'); account.backupSoon(); setTimeout(() => { checkRecapReady(); checkBalanceDue(); checkSurveyDue(); }, 900); }
     else startSetup(false, null, true);   // set up before usernames existed: pick one, then straight to Home
   } else {
     startSetup(false);

@@ -40,6 +40,16 @@ node app/test/budget.test.mjs
 
 **Every time you deploy a change:** bump the `?v=` number in `index.html` (two places) and in the `import` lines of `js/app.js`, `js/track.js` and `js/account.js`, so phones don't mix old and new files.
 
+## How the weekly number works
+Money only counts once it's there. We don't ask when money lands, so we assume monthly money and bills land on the **1st**, and weekly or every-2-weeks ones every 7 or 14 days counting from setup. One-time money counts as already in hand.
+
+- **Weekly number** = for each day money lands or a bill goes out (and the semester end): what's there by then ÷ weeks until then. The smallest wins, rounded down to $5. A 10% cushion (set at setup) and money already saved for the goal are kept out.
+- **Assumed balance** = the last balance the student gave us − purchases logged since + money in logged since + paydays we assumed − bills we assumed. It shows on Home next to the pace line and in Settings, and tapping it shows that math.
+- **Every Monday** the number is worked out again from the assumed balance, so a payday week gets more, and overspending or underspending shows up in the weeks after. Past weeks never change.
+- **Update my balance** (tap the balance on Home, Settings, or the weekly "Still about $X?" notification) resets the assumed balance and re-plans the rest of this week right away.
+
+Example: $185 now and $500 a month from family, on Nov 4 → $40 a week until Nov 30, then the number goes up once the $500 lands Dec 1.
+
 ## Usernames and backups
 In setup, students type their **first name, last name and any 2 numbers**, and the username is made from them: `austin.allaer27` (letters only, accents dropped). The server rejects a username someone already has, so two people with the same name just pick different numbers. There's no password.
 
@@ -53,7 +63,7 @@ Every event has a random ID per phone (`anon_id`), the student's `username` once
 | Event | When | Props |
 |---|---|---|
 | `consent_given` | Student agrees in setup | version |
-| `setup_start`, `setup_step`, `setup_complete` | Setup | step (`username`, `onhand`, `income`, `bills`, `end`, `stress`, `result`, `goal`, `split`, `ready`); income types and frequencies (a type can repeat), bill types and frequencies, whether they have money now (true/false, never the amount), category priority order, any categories they added, the split per week, whether they changed the suggested split, savings goal (name, kind, dollars a week at our pick and at the level they chose), `pace` (`conservative`, `middle`, `aggressive` or `custom` from the slider), cushion, suggested vs final number, seconds taken, baseline stress (0–100) |
+| `setup_start`, `setup_step`, `setup_complete` | Setup | step (`username`, `onhand`, `income`, `bills`, `end`, `stress`, `result`, `goal`, `split`, `ready`); income types and frequencies (a type can repeat), bill types and frequencies, whether they have money now (true/false, never the amount), category priority order, any categories they added, the split per week, whether they changed the suggested split, savings goal (name, kind, dollars a week at our pick and at the level they chose), `pace` (`conservative`, `middle`, `aggressive` or `custom` from the slider), cushion, suggested vs final number, `until_payday` (the number is held down until money lands), seconds taken, baseline stress (0–100) |
 | `setup_redo_start`, `setup_redo_complete` | Settings → Redo setup, Money coming in, Change split or Change goal | same as `setup_complete`, without baseline stress, plus `edit` (`income`, `split`, `goal`, or null for a full redo) |
 | `goal_set`, `goal_removed` | A goal is set or changed, or taken away | name, kind (`every`, `by`, `percent`), freq, pct, per_week |
 | `login` | Logged in with a username on this phone | whether a backup came back |
@@ -65,6 +75,8 @@ Every event has a random ID per phone (`anon_id`), the student's `username` once
 | `log_open`, `tx_add`, `tx_delete` | Logging | amount, category, today/yesterday, % of week used |
 | `money_in` | Logging money coming in (the log sheet's **Money in** side: a refund, cash from a friend, an extra shift). It adds to that week's budget and is never counted as spending | amount, today/yesterday, has_note, week |
 | `alert_shown` | 75% / 100% alert | threshold |
+| `week_planned` | Each Monday's new weekly number, worked out from the assumed balance | week, weekly, save (goal dollars) |
+| `balance_check_shown`, `balance_check` | The weekly "Still about $X?" notification, and the student confirming or fixing the balance (from Home, Settings or the notification) | week; answer (`right` or `updated`), from, and for updates `higher` and `off_pct` (how far off our guess was, as a %). Never the balance itself |
 | `week_closed` | Once per finished week | budget (including any money in), spent, under, purchases logged, added (money in that week), goal_saved (what landed in the goal) |
 | `stress_checkin` | Old 1–5 recap question (replaced by `stress_daily`) | week, score |
 | `deal_open`, `deal_source`, `deals_21_toggle` | Deals | deal id |
@@ -80,7 +92,7 @@ Settings → **What we collect** (also linked from the consent card in setup) li
 |---|---|
 | `setup` Your setup answers | `setup_start`, `setup_step`, `setup_complete`, `setup_redo_start`, `setup_redo_complete`, `goal_set`, `goal_removed` |
 | `purchases` Purchases you log | `log_open`, `tx_add`, `tx_delete` |
-| `weeks` How your weeks go | `week_closed`, `alert_shown` |
+| `weeks` How your weeks go | `week_closed`, `alert_shown`, `week_planned`, `balance_check_shown`, `balance_check` |
 | `stress` Money stress check-ins | `stress_daily`, `stress_checkin`, plus `baseline_stress` inside `setup_complete` |
 | `usage` When and how you use the app | `app_open`, `screen_view`, `recap_view`, `survey_open`, `install_prompt`, `installed` |
 | `deals` Deals you check out | `deal_open`, `deal_source`, `deals_21_toggle` |
@@ -144,6 +156,10 @@ select date_trunc('week', at) as week,
        count(distinct student) filter (where name = 'screen_view' and props->>'screen' = 'deals') as opened_deals,
        count(distinct student) as active
 from student_events group by 1 order by 1;
+
+-- How close the assumed balance was when students checked it
+select props->>'answer' as answer, count(*), round(avg((props->>'off_pct')::int)) as avg_off_pct
+from student_events where name = 'balance_check' group by 1;
 
 -- Satisfaction over time: each check-in (every 5 days of use) and the final survey
 select coalesce((props->>'n')::int, 99) as checkin, props->>'survey' as survey, round(avg((props->>'satisfaction')::int), 2) as satisfaction, count(*) as answers
