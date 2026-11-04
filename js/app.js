@@ -1,11 +1,11 @@
 // Prototype pilot app: setup, Home (ring + quick-log), Deals, Recap, sheets and limit alerts.
 // Rendering is plain template strings. State lives in store.js; pilot events go through track.js.
-import * as store from './store.js?v=48';
-import { track, flush, groupOn, dropGroup, tagQueue } from './track.js?v=48';
-import * as account from './account.js?v=48';
-import * as B from './budget.js?v=48';
-import { APP_VERSION } from './config.js?v=48';
-import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING as ALL_TRACKING, DEALS, QUOTES, SHOW_DEALS } from './content.js?v=48';
+import * as store from './store.js?v=49';
+import { track, flush, groupOn, dropGroup, tagQueue } from './track.js?v=49';
+import * as account from './account.js?v=49';
+import * as B from './budget.js?v=49';
+import { APP_VERSION } from './config.js?v=49';
+import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING as ALL_TRACKING, DEALS, QUOTES, SHOW_DEALS } from './content.js?v=49';
 // What we collect, minus the deals group while deals are switched off (content.js SHOW_DEALS)
 const TRACKING = ALL_TRACKING.filter(g => g.id !== 'deals' || SHOW_DEALS);
 if (!SHOW_DEALS) document.querySelectorAll('[data-tab="deals"]').forEach(b => b.remove());
@@ -906,25 +906,34 @@ function streakPill() {
   return `<span class="streak">${miniRing(n ? 0 : 40)}${label}</span>`;
 }
 
+// Days left this week, today included. The semester's last week ends on its last day.
+function daysLeftThisWeek(now) {
+  return Math.max(1, Math.min(B.daysLeftInWeek(now), B.daysBetween(now, B.parseKey(S().setup.semesterEnd)) + 1));
+}
+// What's left spread over the days it has to cover, named so it matches the calendar:
+// "$18 a day, Wed–Sun", or on the last day "$18 left for today".
+function perDayText(left, now) {
+  const days = daysLeftThisWeek(now), per = Math.floor(Math.max(0, left) / days);
+  if (days === 1) return `${money(per)} left for today`;
+  return `${money(per)} a day, ${SHORT[now.getDay()]}–${SHORT[B.addDays(now, days - 1).getDay()]}`;
+}
+
 function homeHTML() {
   const now = store.now();
   const wk = B.weekKey(now);
   const w = weekStats(wk);
   const split = B.splitFor(S().budgetHistory || [], wk);
   const spentBy = w.spentBy;
-  // the semester's last week ends on its last day
-  const end = S().setup.semesterEnd;
-  const daysLeft = Math.max(1, Math.min(B.daysLeftInWeek(now), B.daysBetween(now, B.parseKey(end)) + 1));
+  const daysLeft = daysLeftThisWeek(now);
   const total = Math.max(1, Math.round(B.weekShare(S(), wk) * 7));
   const elapsed = Math.max(0, total - daysLeft);
   let pace, warm = false;
   if (w.budget <= 0) { pace = 'Nothing to spend this week'; warm = true; }
   else if (w.left <= 0) { warm = true; pace = w.left < 0 ? `${money(-w.left)} over · resets Monday` : `All used · resets Monday`; }
   else {
-    const perDay = Math.floor(w.left / daysLeft);
     const expected = w.budget * (elapsed + 1) / total;   // what's fine to have spent by the end of today
-    if (w.spent <= expected + 0.5) pace = `On pace · ${money(perDay)} a day`;
-    else { warm = true; pace = `Slow down · ${money(perDay)} a day left`; }
+    if (w.spent <= expected + 0.5) pace = `On pace · ${perDayText(w.left, now)}`;
+    else { warm = true; pace = `Slow down · ${perDayText(w.left, now)}`; }
   }
   const bal = balanceNow();
   const items = w.items.slice().sort((a, b) => (a.at < b.at ? 1 : -1));
@@ -1547,15 +1556,13 @@ function checkAlerts(before, after) {
   if (after.budget <= 0) return;
   const s = S();
   const a = (s.alerts[after.wk] ||= {});
-  const daysLeft = B.daysLeftInWeek(store.now());
   let fired = null;
   if (after.pct >= 1 && before.pct < 1 && !a[100]) {
     fired = 100;
-    showToast("That's this week's number.", 'Next week starts fresh on Monday. Anything else this week shows as over, and that\'s okay.');
+    showToast("That's this week's number.", 'Next week starts fresh on Monday.');
   } else if (after.pct >= 0.75 && before.pct < 0.75 && !a[75] && after.pct < 1) {
     fired = 75;
-    const perDay = Math.floor(after.left / daysLeft);
-    showToast("You've used 75% of this week.", `${money(after.left)} left until Sunday${daysLeft > 1 ? `, about ${money(perDay)} a day` : ''}.`);
+    showToast("You've used 75% of this week.", `${money(Math.floor(after.left))} left: ${perDayText(after.left, store.now())}.`);
   }
   if (fired) {
     a[fired] = true;
