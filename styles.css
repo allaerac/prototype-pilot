@@ -640,14 +640,23 @@ textarea.field { resize: none; min-height: 5em; font: inherit; }
   .date-in { font-size: 1.5em; }
 }
 
-/* ---------- Too short to hold a screen (a phone turned sideways): ask to turn it upright ---------- */
+/* ---------- A phone turned sideways: ask to turn it upright ----------
+   Set from app.js (checkSideways) from the phone's real orientation, not the page's shape: the keyboard also
+   makes the page short and wide, and hiding the app then closed the keyboard the moment a text box was tapped. */
 .turn { display: none; }
-@media (orientation: landscape) and (max-height: 500px) {
-  .turn { position: absolute; inset: 0; z-index: 80; display: grid; place-content: center; justify-items: center; gap: .6em; padding: 2em; text-align: center; background: var(--screen); font-size: 16px; }
-  .turn svg { width: 3em; height: 3em; fill: none; stroke: var(--screen-ink); stroke-width: 1.6; stroke-linecap: round; transform: rotate(90deg); margin-bottom: .4em; }
-  .turn b { font-family: var(--display); font-weight: 500; font-size: 1.4em; }
-  .turn span { color: var(--screen-soft); max-width: 24em; font-size: .95em; }
-  .app > :not(.turn) { visibility: hidden; }
+.app[data-sideways] .turn { position: absolute; inset: 0; z-index: 80; display: grid; place-content: center; justify-items: center; gap: .6em; padding: 2em; text-align: center; background: var(--screen); font-size: 16px; }
+.app[data-sideways] .turn svg { width: 3em; height: 3em; fill: none; stroke: var(--screen-ink); stroke-width: 1.6; stroke-linecap: round; transform: rotate(90deg); margin-bottom: .4em; }
+.app[data-sideways] .turn b { font-family: var(--display); font-weight: 500; font-size: 1.4em; }
+.app[data-sideways] .turn span { color: var(--screen-soft); max-width: 24em; font-size: .95em; }
+.app[data-sideways] > :not(.turn) { visibility: hidden; }
+
+/* While the keyboard is up (a text box has focus) the screen keeps its size, so setup may scroll instead */
+.app[data-typing] .setup-body { overflow-y: auto; }
+
+/* iPhones zoom the page into any text box under 16px, and the zoom sticks. On touch screens they never go below it. */
+@media (pointer: coarse) {
+  .field, textarea.field, .freq-sel, .date-in.small { font-size: max(16px, 1em); }
+  .money-in input { font-size: max(16px, 1.15em); }
 }
 
 /* ---------- Very narrow phones (folded foldables, first-gen iPhone SE) ---------- */

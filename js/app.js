@@ -1,11 +1,11 @@
 // Prototype pilot app: setup, Home (ring + quick-log), Deals, Recap, sheets and limit alerts.
 // Rendering is plain template strings. State lives in store.js; pilot events go through track.js.
-import * as store from './store.js?v=49';
-import { track, flush, groupOn, dropGroup, tagQueue } from './track.js?v=49';
-import * as account from './account.js?v=49';
-import * as B from './budget.js?v=49';
-import { APP_VERSION } from './config.js?v=49';
-import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING as ALL_TRACKING, DEALS, QUOTES, SHOW_DEALS } from './content.js?v=49';
+import * as store from './store.js?v=50';
+import { track, flush, groupOn, dropGroup, tagQueue } from './track.js?v=50';
+import * as account from './account.js?v=50';
+import * as B from './budget.js?v=50';
+import { APP_VERSION } from './config.js?v=50';
+import { APP_NAME, SEMESTER_END_DEFAULT, CATEGORIES, SOURCES, FREQS, BILLS, CONSENT, TRACKING as ALL_TRACKING, DEALS, QUOTES, SHOW_DEALS } from './content.js?v=50';
 // What we collect, minus the deals group while deals are switched off (content.js SHOW_DEALS)
 const TRACKING = ALL_TRACKING.filter(g => g.id !== 'deals' || SHOW_DEALS);
 if (!SHOW_DEALS) document.querySelectorAll('[data-tab="deals"]').forEach(b => b.remove());
@@ -104,7 +104,17 @@ function fitScale(box, scroller, over) {
     box.style.fontSize = (base * k).toFixed(2) + 'px';
   }
 }
+// A text box has focus, so the keyboard is (or is about to be) up.
+const isTyping = () => {
+  const a = document.activeElement;
+  return !!a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && !['range', 'checkbox', 'radio', 'button'].includes(a.type)));
+};
+let fitHeight = 0;   // the window's height the last time we fitted with no keyboard up
 function fitAll() {
+  // When the keyboard makes the window shorter, keep the screen as it was instead of shrinking everything
+  // (it jumped on every keystroke). Setup can scroll while typing instead (styles.css, data-typing).
+  if (isTyping() && fitHeight && innerHeight < fitHeight - 60) return;
+  if (!isTyping()) fitHeight = innerHeight;
   if (mode === 'setup') {
     const v = viewsEl.querySelector('.v-setup');
     if (v) fitScale(v, v.querySelector('.setup-body'));
@@ -1832,6 +1842,13 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (e.key === 'Enter' && mode === 'setup' && e.target.matches && e.target.matches('[data-newcat]')) { e.preventDefault(); addNewCat(); return; }
+  // the keyboard's Next key on the name screen goes to the next box
+  if (e.key === 'Enter' && mode === 'setup' && e.target.dataset && e.target.dataset.namef && e.target.dataset.namef !== 'num') {
+    e.preventDefault();
+    const next = document.getElementById(e.target.dataset.namef === 'first' ? 'lname' : 'unum');
+    if (next) next.focus();
+    return;
+  }
   if (e.key === 'Enter' && mode === 'setup' && !sheet && e.target.tagName !== 'BUTTON') { e.preventDefault(); nextStep(); }
 });
 
@@ -1855,7 +1872,33 @@ document.addEventListener('visibilitychange', () => {
   checkSurveyDue();
 });
 setInterval(() => { refreshIfNewDay(); checkRecapReady(); }, 60000);
-addEventListener('resize', () => fitAll());
+addEventListener('resize', () => { checkSideways(); fitAll(); });
+
+// "Turn your phone upright" goes by how the phone is held, never by the page's shape: the keyboard makes the
+// page short and wide too. On a computer (screen at least 500px both ways) a short, wide window still asks.
+function checkSideways() {
+  const type = screen.orientation && screen.orientation.type;
+  const phoneSideways = type ? type.startsWith('landscape') : typeof window.orientation === 'number' ? Math.abs(window.orientation) === 90 : innerWidth > innerHeight;
+  const phone = Math.min(screen.width, screen.height) < 500;
+  const sideways = phone ? phoneSideways && innerWidth > innerHeight : !isTyping() && innerWidth > innerHeight && innerHeight < 500;
+  app.toggleAttribute('data-sideways', sideways);
+}
+if (screen.orientation) screen.orientation.addEventListener('change', checkSideways);
+addEventListener('orientationchange', checkSideways);
+document.addEventListener('focusin', () => { app.toggleAttribute('data-typing', isTyping()); });
+document.addEventListener('focusout', () => {
+  setTimeout(() => {
+    const typing = isTyping();
+    app.toggleAttribute('data-typing', typing);
+    if (!typing) {
+      // iPhones scroll the page up for the keyboard and can leave it there: put it back, then refit
+      if (scrollX || scrollY) scrollTo(0, 0);
+      checkSideways();
+      fitAll();
+    }
+  }, 60);
+});
+checkSideways();
 
 addEventListener('beforeinstallprompt', e => {
   e.preventDefault();
